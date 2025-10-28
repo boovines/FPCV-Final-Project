@@ -1,24 +1,11 @@
-# Core
+# Core Vision-Prompt Glasses Dependencies
 opencv-python
 numpy
-tensorflow>=2.10.0
-scikit-learn
-matplotlib
-seaborn
-
-# Optional: PyTorch (if needed later)
-# torch
-# torchvision
-
-# Data Augmentation & Utils
-tqdm
+mediapipe
+openai
+python-dotenv
 Pillow
 
-# Optional: Detection & Training
-# ultralytics
-# mediapipe
-
-# Data & Utils
-kaggle
-python-dotenv
-requests
+# Optional: Voice input (for future phases)
+# SpeechRecognition
+# whisper

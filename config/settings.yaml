@@ -1,0 +1,33 @@
+# Vision-Prompt Glasses Configuration
+
+# Gesture Detection Settings
+gesture:
+  stability_threshold: 2.0  # seconds to hold gesture
+  stability_tolerance: 30.0  # pixel movement tolerance
+  min_frame_size: 50  # minimum frame size in pixels
+  min_frame_area: 1000  # minimum frame area in pixels squared
+
+# Camera Settings
+camera:
+  width: 1280
+  height: 720
+  fps: 30
+  device_id: 0  # webcam device ID
+
+# OpenAI Settings
+openai:
+  model: "gpt-4o"
+  max_tokens: 1000
+  temperature: 0.7
+
+# Image Processing
+image:
+  output_width: 512
+  output_height: 512
+  format: "JPEG"
+  quality_threshold: 0.8  # max black pixel ratio
+
+# Application Settings
+app:
+  capture_cooldown: 3.0  # seconds between captures
+  max_cached_snapshots: 10  # number of snapshots to show in selection
