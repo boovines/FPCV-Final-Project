@@ -10,3 +10,4 @@ Pillow
 SpeechRecognition
 PyAudio
 elevenlabs
+mpv
