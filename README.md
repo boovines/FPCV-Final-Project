@@ -126,20 +126,21 @@ Convert to Base64
 1. Clone repo:
 
    ```bash
-   git clone https://github.com/<your-username>/vision-prompt-glasses.git
-   cd vision-prompt-glasses
+   git clone https://github.com/boovines/FPCV-Final-Project.git
+   cd FPCV-Final-Project
    ```
 
 2. Install dependencies:
 
    ```bash
-   pip install mediapipe opencv-python openai numpy
+   pip install -r requirements.txt
    ```
 
 3. Set up environment:
 
    ```bash
    export OPENAI_API_KEY="sk-..."
+   export ELEVENLABS_API_KEY="sk-..."
    ```
 
 4. Run the prototype:
