@@ -140,7 +140,13 @@ Convert to Base64
 
    ```bash
    export OPENAI_API_KEY="sk-..."
-   export ELEVENLABS_API_KEY="sk-..."
+   export ELEVENLABS_API_KEY="xi-..."  # or ELEVEN_API_KEY
+   # Optional but recommended: set a specific ElevenLabs voice
+   # If not set, the app will auto-select the first available voice
+   export ELEVENLABS_TTS_VOICE_ID="YOUR_VOICE_ID"
+   # Optional: use streaming playback if PyAudio isn't installed
+   # Defaults to pcm_16000 (local playback)
+   export ELEVENLABS_TTS_OUTPUT_FORMAT="mp3_44100_128"
    ```
 
 4. Run the prototype:

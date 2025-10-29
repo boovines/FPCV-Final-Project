@@ -110,8 +110,61 @@ class VisionPromptGlasses:
             try:
                 self.eleven_client = ElevenLabs(api_key=self.eleven_api_key)
                 self.tts_ready = bool(self.eleven_tts_voice_id)
+                # If no voice configured, attempt to pick the first available voice
+                if not self.tts_ready:
+                    try:
+                        selected_voice = None
+                        # Try SDK listing first
+                        voices = getattr(self.eleven_client, "voices", None)
+                        list_method = getattr(voices, "list", None) if voices else None
+                        if callable(list_method):
+                            voice_list = list_method()
+                            candidate_voices = []
+                            if isinstance(voice_list, dict) and "voices" in voice_list:
+                                candidate_voices = voice_list.get("voices") or []
+                            elif hasattr(voice_list, "voices"):
+                                candidate_voices = getattr(voice_list, "voices") or []
+                            else:
+                                candidate_voices = voice_list if isinstance(voice_list, (list, tuple)) else []
+                            for v in candidate_voices:
+                                vid = v.get("voice_id") if isinstance(v, dict) else (getattr(v, "voice_id", None) or getattr(v, "id", None))
+                                if vid:
+                                    selected_voice = vid
+                                    break
+                        # Fallback to REST if SDK listing is unavailable
+                        if selected_voice is None:
+                            rest = requests.get(
+                                "https://api.elevenlabs.io/v1/voices",
+                                headers={"xi-api-key": self.eleven_api_key},
+                                timeout=20,
+                            )
+                            rest.raise_for_status()
+                            data = rest.json() or {}
+                            for v in data.get("voices", []) or []:
+                                vid = v.get("voice_id") or v.get("id")
+                                if vid:
+                                    selected_voice = vid
+                                    break
+                        if selected_voice:
+                            self.eleven_tts_voice_id = selected_voice
+                            self.tts_ready = True
+                            print(f"Note: No ELEVENLABS_TTS_VOICE_ID set; using default voice: {selected_voice}")
+                        else:
+                            print("Warning: No voices available in ElevenLabs account. Create a voice and set ELEVENLABS_TTS_VOICE_ID.")
+                    except Exception as voice_err:
+                        print(f"Warning: Could not auto-select a voice ({voice_err}). Set ELEVENLABS_TTS_VOICE_ID.")
             except Exception as sdk_error:
                 print(f"Warning: ElevenLabs SDK initialization failed ({sdk_error}). Falling back to REST API calls.")
+
+        # Provide actionable guidance if local PCM playback is configured but PyAudio is missing
+        if self.use_local_tts_playback:
+            try:
+                import pyaudio  # noqa: F401
+            except Exception:
+                print(
+                    "Note: ELEVENLABS_TTS_OUTPUT_FORMAT is set to a PCM format but PyAudio is not available. "
+                    "Either install PyAudio or set ELEVENLABS_TTS_OUTPUT_FORMAT=mp3_44100_128 to use SDK streaming playback."
+                )
         
     def initialize_camera(self) -> bool:
         """Initialize webcam capture."""
@@ -579,6 +632,7 @@ class VisionPromptGlasses:
                         playback_success = self._play_audio_bytes(audio_bytes, self.eleven_tts_sample_rate)
 
                 if not playback_success:
+                    # Use ElevenLabs SDK streaming playback as a fallback
                     stream(chunk for chunk in audio_chunks)
                 # --- end TTS via ElevenLabs streaming ---
             except Exception as tts_error:
@@ -587,6 +641,8 @@ class VisionPromptGlasses:
                 return
 
         print(f"\nAI Response:\n{ai_response}\n")
+
+    
 
     def run(self):
         """Main application loop."""
@@ -668,6 +724,7 @@ class VisionPromptGlasses:
                         print("OpenAI connection test: SUCCESS")
                     else:
                         print("OpenAI connection test: FAILED")
+                
         
         except KeyboardInterrupt:
             print("\nInterrupted by user")
