@@ -1,11 +1,21 @@
+#!/usr/bin/env python3
+"""
+Vision-Prompt Glasses with TTS Integration
+Modified version that speaks AI responses aloud
+"""
+
 import io
 import cv2
 import numpy as np
 import os
+import sys
 import time
 import requests
 from datetime import datetime
 from typing import Optional
+
+# Add parent directory to path to import modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mediapipe_utils import HandDetector
 from frame_detector import FrameDetector
@@ -13,13 +23,8 @@ from crop_utils import CropUtils
 from openai_client import OpenAIClient
 from dotenv import load_dotenv
 
-# TTS Integration
-try:
-    from tts_test.ai_response_tts import AIResponseTTS
-    TTS_AVAILABLE = True
-except ImportError:
-    TTS_AVAILABLE = False
-    print("Warning: TTS integration not available. Install tts_test module for audio output.")
+# Import TTS functionality
+from ai_response_tts import AIResponseTTS
 
 try:
     import speech_recognition as sr
@@ -31,24 +36,22 @@ try:
 except ImportError:
     ElevenLabs = None
 
-class VisionPromptGlasses:
+class VisionPromptGlassesWithTTS:
     def __init__(self):
-        """Initialize the Vision-Prompt Glasses prototype."""
+        """Initialize the Vision-Prompt Glasses prototype with TTS."""
         # Initialize components
         self.hand_detector = HandDetector()
         self.frame_detector = FrameDetector()
         self.crop_utils = CropUtils()
         self.openai_client = OpenAIClient()
         
-        # Initialize TTS if available
-        self.tts = None
-        if TTS_AVAILABLE:
-            try:
-                self.tts = AIResponseTTS()
-                print("✅ TTS system initialized - AI responses will be spoken aloud")
-            except Exception as e:
-                print(f"⚠️  TTS initialization failed: {e}")
-                self.tts = None
+        # Initialize TTS
+        try:
+            self.tts = AIResponseTTS()
+            print("✅ TTS system initialized")
+        except Exception as e:
+            print(f"❌ TTS initialization failed: {e}")
+            self.tts = None
         
         # Camera setup
         self.cap = None
@@ -62,7 +65,7 @@ class VisionPromptGlasses:
         self.last_capture_time = 0
         self.capture_cooldown = 3.0  # seconds between captures
 
-        # Load environment variables (useful when running outside CLI context)
+        # Load environment variables
         load_dotenv()
 
         # Verify speech recognition dependency
@@ -74,7 +77,7 @@ class VisionPromptGlasses:
 
         # Speech recognition configuration
         self.recognizer = sr.Recognizer()
-        self.recognizer.pause_threshold = 1.0  # Stop after ~1s silence
+        self.recognizer.pause_threshold = 1.0
         self.recognizer.non_speaking_duration = 0.4
         self.recognizer.dynamic_energy_threshold = True
         self.audio_sample_rate = 16000
@@ -98,14 +101,14 @@ class VisionPromptGlasses:
             "https://api.elevenlabs.io/v1/speech-to-text",
         )
 
-        # Initialize ElevenLabs SDK if available (REST fallback otherwise)
+        # Initialize ElevenLabs SDK if available
         self.eleven_client = None
         if ElevenLabs is not None:
             try:
                 self.eleven_client = ElevenLabs(api_key=self.eleven_api_key)
             except Exception as sdk_error:
                 print(f"Warning: ElevenLabs SDK initialization failed ({sdk_error}). Falling back to REST API calls.")
-        
+    
     def initialize_camera(self) -> bool:
         """Initialize webcam capture."""
         try:
@@ -146,7 +149,7 @@ class VisionPromptGlasses:
             return None
         
         print("\nAvailable cached snapshots:")
-        for i, snapshot in enumerate(snapshots[:10]):  # Show last 10
+        for i, snapshot in enumerate(snapshots[:10]):
             filename = os.path.basename(snapshot)
             print(f"{i + 1}. {filename}")
         
@@ -193,7 +196,7 @@ class VisionPromptGlasses:
             if response:
                 print(f"\nAI Response:\n{response}\n")
                 
-                # Speak the AI response if TTS is available
+                # Speak the AI response
                 if self.tts:
                     self.tts.speak_ai_response(response)
             else:
@@ -251,7 +254,7 @@ class VisionPromptGlasses:
             if response:
                 print(f"\nAI Response:\n{response}\n")
                 
-                # Speak the AI response if TTS is available
+                # Speak the AI response
                 if self.tts:
                     self.tts.speak_ai_response(response)
             else:
@@ -360,7 +363,7 @@ class VisionPromptGlasses:
         if result is None:
             return None
 
-        # Handle SDK response objects (may expose `.text` or `.transcription`)
+        # Handle SDK response objects
         for attr in ("text", "transcription", "transcript"):
             value = getattr(result, attr, None)
             if isinstance(value, str) and value.strip():
@@ -387,14 +390,14 @@ class VisionPromptGlasses:
     
     def run(self):
         """Main application loop."""
-        print("Vision-Prompt Glasses Prototype")
-        print("==============================")
+        print("Vision-Prompt Glasses with TTS")
+        print("=============================")
         print("Instructions:")
         print("- Form a rectangle with both hands (thumb + index extended, others curled)")
         print("- Hold the gesture steady for 2 seconds")
         print("- Press 'q' to quit, 'r' to reset, 's' to select cached snapshot")
         print("- Press 't' to test OpenAI connection")
-        print("- Press 'v' to test TTS system")
+        print("- Press 'v' to test TTS")
         print()
         
         # Initialize camera
@@ -443,12 +446,10 @@ class VisionPromptGlasses:
                 # Capture if gesture detected
                 if gesture_detected and corners:
                     self.capture_and_analyze(frame, corners)
-                    # Removed blocking waitKey call - continue with the frame feed
                     self.frame_detector.reset()
-                    # Directly continue with the next frames
                 
                 # Display frame
-                cv2.imshow('Vision-Prompt Glasses', overlay_frame)
+                cv2.imshow('Vision-Prompt Glasses with TTS', overlay_frame)
                 
                 # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
@@ -468,10 +469,9 @@ class VisionPromptGlasses:
                         print("OpenAI connection test: FAILED")
                 elif key == ord('v'):
                     if self.tts:
-                        self.tts.speak_ai_response("TTS test successful! The text-to-speech system is working correctly.")
-                        print("TTS test: SUCCESS - Check your speakers for audio output")
+                        self.tts.speak_ai_response("TTS test successful! The text-to-speech system is working.")
                     else:
-                        print("TTS test: FAILED - TTS system not available")
+                        print("TTS not available")
         
         except KeyboardInterrupt:
             print("\nInterrupted by user")
@@ -494,7 +494,7 @@ class VisionPromptGlasses:
 def main():
     """Main entry point."""
     try:
-        app = VisionPromptGlasses()
+        app = VisionPromptGlassesWithTTS()
         app.run()
     except Exception as e:
         print(f"Error running application: {e}")
