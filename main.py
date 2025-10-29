@@ -1,3 +1,4 @@
+import base64
 import io
 import cv2
 import numpy as np
@@ -20,8 +21,10 @@ except ImportError:
 
 try:
     from elevenlabs.client import ElevenLabs
+    from elevenlabs import stream
 except ImportError:
     ElevenLabs = None
+    stream = None
 
 class VisionPromptGlasses:
     def __init__(self):
@@ -73,6 +76,21 @@ class VisionPromptGlasses:
                 "ElevenLabs API key not found. Set ELEVENLABS_API_KEY or ELEVEN_API_KEY in your environment."
             )
 
+        self.eleven_tts_voice_id = (
+            os.getenv("ELEVENLABS_TTS_VOICE_ID")
+            or os.getenv("ELEVENLABS_VOICE_ID")
+            or os.getenv("ELEVEN_VOICE_ID")
+        )
+        if not self.eleven_tts_voice_id:
+            print(
+                "Warning: ElevenLabs voice ID not configured. Set ELEVENLABS_TTS_VOICE_ID to enable TTS playback."
+            )
+
+        self.eleven_tts_model_id = os.getenv("ELEVENLABS_TTS_MODEL_ID", "eleven_turbo_v2")
+        self.eleven_tts_output_format = os.getenv("ELEVENLABS_TTS_OUTPUT_FORMAT", "pcm_16000")
+        self.eleven_tts_sample_rate = self._infer_sample_rate(self.eleven_tts_output_format)
+        self.use_local_tts_playback = self.eleven_tts_output_format.startswith("pcm_")
+
         self.eleven_stt_model_id = os.getenv("ELEVENLABS_STT_MODEL_ID", "scribe_v1")
         self.eleven_stt_language = os.getenv("ELEVENLABS_STT_LANGUAGE", "en")
         self.eleven_stt_endpoint = os.getenv(
@@ -82,9 +100,16 @@ class VisionPromptGlasses:
 
         # Initialize ElevenLabs SDK if available (REST fallback otherwise)
         self.eleven_client = None
-        if ElevenLabs is not None:
+        self.tts_ready = False
+
+        if ElevenLabs is None or stream is None:
+            print(
+                "Warning: ElevenLabs SDK streaming utilities not available; AI responses will be text-only."
+            )
+        else:
             try:
                 self.eleven_client = ElevenLabs(api_key=self.eleven_api_key)
+                self.tts_ready = bool(self.eleven_tts_voice_id)
             except Exception as sdk_error:
                 print(f"Warning: ElevenLabs SDK initialization failed ({sdk_error}). Falling back to REST API calls.")
         
@@ -173,7 +198,7 @@ class VisionPromptGlasses:
             response = self.openai_client.analyze_with_default_prompt(image_base64, prompt)
             
             if response:
-                print(f"\nAI Response:\n{response}\n")
+                self.output_ai_response(response)
             else:
                 print("Failed to get response from AI.")
                 
@@ -227,7 +252,7 @@ class VisionPromptGlasses:
             response = self.openai_client.analyze_with_default_prompt(image_base64, prompt)
             
             if response:
-                print(f"\nAI Response:\n{response}\n")
+                self.output_ai_response(response)
             else:
                 print("Failed to get response from AI.")
             
@@ -358,7 +383,211 @@ class VisionPromptGlasses:
                     return combined
 
         return None
+
+    @staticmethod
+    def _infer_sample_rate(output_format: Optional[str]) -> int:
+        """Extract the PCM sample rate from ElevenLabs output format strings."""
+        default_rate = 16000
+
+        if not output_format or "pcm" not in output_format:
+            return default_rate
+
+        try:
+            suffix = output_format.split("pcm_", 1)[1]
+        except IndexError:
+            return default_rate
+
+        digits = []
+        for char in suffix:
+            if char.isdigit():
+                digits.append(char)
+            else:
+                break
+
+        if not digits:
+            return default_rate
+
+        try:
+            inferred = int("".join(digits))
+            return inferred if inferred > 0 else default_rate
+        except ValueError:
+            return default_rate
+
+    @staticmethod
+    def _materialize_audio_chunks(audio_candidate: Optional[object]) -> tuple:
+        """Materialize potentially streaming audio payloads into a tuple for reuse."""
+        if audio_candidate is None:
+            return tuple()
+
+        if isinstance(audio_candidate, (bytes, bytearray, str, dict)):
+            return (audio_candidate,)
+
+        iterator = getattr(audio_candidate, "__iter__", None)
+        if callable(iterator):
+            try:
+                return tuple(audio_candidate)
+            except TypeError:
+                return tuple()
+
+        return tuple()
+
+    @staticmethod
+    def _extract_audio_payload(chunk: Optional[object]) -> Optional[object]:
+        """Pull the actual audio field out of various ElevenLabs chunk shapes."""
+        if chunk is None:
+            return None
+
+        if isinstance(chunk, dict):
+            for key in ("audio", "data", "chunk", "value"):
+                if key in chunk and chunk[key] is not None:
+                    return chunk[key]
+            return None
+
+        return chunk
+
+    @staticmethod
+    def _collect_audio_bytes(audio_chunks: tuple) -> bytes:
+        """Decode base64/audio chunks into raw bytes."""
+        if not audio_chunks:
+            return b""
+
+        audio_buffer = bytearray()
+
+        for raw_chunk in audio_chunks:
+            payload = VisionPromptGlasses._extract_audio_payload(raw_chunk)
+            if payload is None:
+                continue
+
+            if isinstance(payload, str):
+                try:
+                    decoded = base64.b64decode(payload, validate=True)
+                except (ValueError, TypeError):
+                    continue
+                audio_buffer.extend(decoded)
+            elif isinstance(payload, (bytes, bytearray, memoryview)):
+                audio_buffer.extend(bytes(payload))
+
+        return bytes(audio_buffer)
+
+    @staticmethod
+    def _play_audio_bytes(audio_bytes: bytes, sample_rate: int) -> bool:
+        """Play raw PCM audio bytes using PyAudio."""
+        if not audio_bytes:
+            return False
+
+        try:
+            import pyaudio
+        except ImportError:
+            print("PyAudio not available for TTS playback; skipping audio output.")
+            return False
+
+        pyaudio_instance = None
+        stream_handle = None
+
+        try:
+            pyaudio_instance = pyaudio.PyAudio()
+            stream_handle = pyaudio_instance.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=sample_rate,
+                output=True,
+            )
+
+            chunk_size = 4096
+            for index in range(0, len(audio_bytes), chunk_size):
+                stream_handle.write(audio_bytes[index:index + chunk_size])
+
+            return True
+        except Exception as playback_error:
+            print(f"Local TTS playback failed: {playback_error}")
+            return False
+        finally:
+            if stream_handle is not None:
+                try:
+                    stream_handle.stop_stream()
+                    stream_handle.close()
+                except Exception:
+                    pass
+
+            if pyaudio_instance is not None:
+                try:
+                    pyaudio_instance.terminate()
+                except Exception:
+                    pass
     
+    def output_ai_response(self, ai_response: Optional[str]):
+        """Stream the AI response via ElevenLabs TTS and print it as a fallback."""
+        if not ai_response:
+            return
+
+        if self.tts_ready and self.eleven_client is not None and stream is not None:
+            try:
+                # --- begin TTS via ElevenLabs streaming ---
+                tts_api = self.eleven_client.text_to_speech
+
+                call_kwargs = {
+                    "voice_id": self.eleven_tts_voice_id,
+                    "model_id": self.eleven_tts_model_id,
+                    "text": ai_response,
+                }
+
+                if self.eleven_tts_output_format:
+                    call_kwargs["output_format"] = self.eleven_tts_output_format
+
+                audio_chunks = tuple()
+
+                stream_method = getattr(tts_api, "stream", None)
+                if callable(stream_method):
+                    try:
+                        raw_audio = stream_method(**call_kwargs)
+                    except TypeError:
+                        call_kwargs.pop("output_format", None)
+                        raw_audio = stream_method(**call_kwargs)
+                    audio_chunks = self._materialize_audio_chunks(raw_audio)
+                else:
+                    convert_method = getattr(tts_api, "convert", None)
+                    if not callable(convert_method):
+                        raise RuntimeError("ElevenLabs SDK does not expose a stream or convert method.")
+
+                    convert_kwargs = call_kwargs.copy()
+                    try:
+                        tts_result = convert_method(**convert_kwargs)
+                    except TypeError:
+                        convert_kwargs.pop("output_format", None)
+                        tts_result = convert_method(**convert_kwargs)
+
+                    if callable(getattr(tts_result, "stream", None)):
+                        audio_chunks = self._materialize_audio_chunks(tts_result.stream())
+                    else:
+                        audio_attr = getattr(tts_result, "audio", None)
+                        audio_chunks = self._materialize_audio_chunks(audio_attr)
+
+                        if not audio_chunks and isinstance(tts_result, dict):
+                            audio_chunks = self._materialize_audio_chunks(tts_result.get("audio"))
+
+                        if not audio_chunks:
+                            audio_chunks = self._materialize_audio_chunks(tts_result)
+
+                if not audio_chunks:
+                    raise RuntimeError("ElevenLabs TTS returned no audio chunks to stream.")
+
+                playback_success = False
+
+                if self.use_local_tts_playback:
+                    audio_bytes = self._collect_audio_bytes(audio_chunks)
+                    if audio_bytes:
+                        playback_success = self._play_audio_bytes(audio_bytes, self.eleven_tts_sample_rate)
+
+                if not playback_success:
+                    stream(chunk for chunk in audio_chunks)
+                # --- end TTS via ElevenLabs streaming ---
+            except Exception as tts_error:
+                print(f"[TTS stream error] {tts_error}")
+                print(f"\nAI Response:\n{ai_response}\n")
+                return
+
+        print(f"\nAI Response:\n{ai_response}\n")
+
     def run(self):
         """Main application loop."""
         print("Vision-Prompt Glasses Prototype")
