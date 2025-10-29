@@ -1,7 +1,9 @@
+import io
 import cv2
 import numpy as np
 import os
 import time
+import requests
 from datetime import datetime
 from typing import Optional
 
@@ -9,6 +11,17 @@ from mediapipe_utils import HandDetector
 from frame_detector import FrameDetector
 from crop_utils import CropUtils
 from openai_client import OpenAIClient
+from dotenv import load_dotenv
+
+try:
+    import speech_recognition as sr
+except ImportError:
+    sr = None
+
+try:
+    from elevenlabs.client import ElevenLabs
+except ImportError:
+    ElevenLabs = None
 
 class VisionPromptGlasses:
     def __init__(self):
@@ -30,6 +43,50 @@ class VisionPromptGlasses:
         # State tracking
         self.last_capture_time = 0
         self.capture_cooldown = 3.0  # seconds between captures
+
+        # Load environment variables (useful when running outside CLI context)
+        load_dotenv()
+
+        # Verify speech recognition dependency
+        if sr is None:
+            raise ImportError(
+                "speech_recognition package is required for voice input. "
+                "Install it with 'pip install SpeechRecognition' and ensure PyAudio dependencies are available."
+            )
+
+        # Speech recognition configuration
+        self.recognizer = sr.Recognizer()
+        self.recognizer.pause_threshold = 1.0  # Stop after ~1s silence
+        self.recognizer.non_speaking_duration = 0.4
+        self.recognizer.dynamic_energy_threshold = True
+        self.audio_sample_rate = 16000
+        self.listen_timeout = float(os.getenv("ELEVENLABS_LISTEN_TIMEOUT", 12))
+        self.max_listen_duration = float(os.getenv("ELEVENLABS_MAX_LISTEN_SECONDS", 25))
+
+        # ElevenLabs configuration
+        self.eleven_api_key = (
+            os.getenv("ELEVENLABS_API_KEY")
+            or os.getenv("ELEVEN_API_KEY")
+        )
+        if not self.eleven_api_key:
+            raise ValueError(
+                "ElevenLabs API key not found. Set ELEVENLABS_API_KEY or ELEVEN_API_KEY in your environment."
+            )
+
+        self.eleven_stt_model_id = os.getenv("ELEVENLABS_STT_MODEL_ID", "scribe_v1")
+        self.eleven_stt_language = os.getenv("ELEVENLABS_STT_LANGUAGE", "en")
+        self.eleven_stt_endpoint = os.getenv(
+            "ELEVENLABS_STT_ENDPOINT",
+            "https://api.elevenlabs.io/v1/speech-to-text",
+        )
+
+        # Initialize ElevenLabs SDK if available (REST fallback otherwise)
+        self.eleven_client = None
+        if ElevenLabs is not None:
+            try:
+                self.eleven_client = ElevenLabs(api_key=self.eleven_api_key)
+            except Exception as sdk_error:
+                print(f"Warning: ElevenLabs SDK initialization failed ({sdk_error}). Falling back to REST API calls.")
         
     def initialize_camera(self) -> bool:
         """Initialize webcam capture."""
@@ -159,10 +216,10 @@ class VisionPromptGlasses:
                 print("Failed to encode image")
                 return
             
-            # Get user prompt
-            prompt = input("\nEnter your question about the captured image: ")
-            if not prompt.strip():
-                print("No prompt provided.")
+            # Get spoken user prompt via ElevenLabs speech-to-text
+            prompt = self.capture_spoken_prompt()
+            if not prompt:
+                print("No spoken prompt captured.")
                 return
             
             # Send to OpenAI
@@ -179,6 +236,128 @@ class VisionPromptGlasses:
             
         except Exception as e:
             print(f"Error in capture and analyze: {e}")
+
+    def capture_spoken_prompt(self) -> Optional[str]:
+        """Record the user's spoken question and transcribe it via ElevenLabs."""
+        try:
+            with sr.Microphone(sample_rate=self.audio_sample_rate) as source:
+                print("\nListening... (speak your question)")
+                # Calibrate to ambient noise for more reliable detection
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+
+                try:
+                    audio = self.recognizer.listen(
+                        source,
+                        timeout=self.listen_timeout,
+                        phrase_time_limit=self.max_listen_duration,
+                    )
+                except sr.WaitTimeoutError:
+                    print("No speech detected within the listening window.")
+                    return None
+
+            print("Processing speech...")
+            audio_bytes = audio.get_wav_data()
+            transcript = self.transcribe_audio_with_elevenlabs(audio_bytes)
+
+            if transcript:
+                print(f"You said: {transcript}")
+                return transcript
+
+            print("Transcription failed or returned empty text.")
+            return None
+
+        except sr.UnknownValueError:
+            print("Speech was unintelligible. Please try again.")
+            return None
+        except sr.RequestError as e:
+            print(f"Speech recognition error: {e}")
+            return None
+        except Exception as e:
+            print(f"Unexpected error capturing audio: {e}")
+            return None
+
+    def transcribe_audio_with_elevenlabs(self, audio_bytes: bytes) -> Optional[str]:
+        """Send recorded audio to ElevenLabs Speech-to-Text and return the transcript."""
+        if not audio_bytes:
+            return None
+
+        # Attempt SDK transcription first
+        if self.eleven_client is not None:
+            audio_buffer = io.BytesIO(audio_bytes)
+            audio_buffer.name = "question.wav"
+            try:
+                result = self.eleven_client.speech_to_text.convert(
+                    file=audio_buffer,
+                    model_id=self.eleven_stt_model_id,
+                    language_code=self.eleven_stt_language,
+                )
+
+                transcript = self._extract_transcript_from_result(result)
+                if transcript:
+                    return transcript
+            except Exception as sdk_error:
+                print(f"ElevenLabs SDK transcription error: {sdk_error}. Falling back to REST API.")
+
+        # REST API fallback using requests
+        try:
+            response = requests.post(
+                self.eleven_stt_endpoint,
+                headers={
+                    "xi-api-key": self.eleven_api_key,
+                },
+                data={
+                    "model_id": self.eleven_stt_model_id,
+                    "language_code": self.eleven_stt_language,
+                },
+                files={
+                    "file": ("question.wav", audio_bytes, "audio/wav"),
+                },
+                timeout=90,
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            transcript = self._extract_transcript_from_result(result)
+            if transcript:
+                return transcript
+
+            print("ElevenLabs STT response did not include a transcript.")
+            return None
+
+        except requests.RequestException as rest_error:
+            print(f"ElevenLabs REST transcription error: {rest_error}")
+            return None
+
+    @staticmethod
+    def _extract_transcript_from_result(result: Optional[object]) -> Optional[str]:
+        """Normalize various ElevenLabs STT response styles to a plain string."""
+        if result is None:
+            return None
+
+        # Handle SDK response objects (may expose `.text` or `.transcription`)
+        for attr in ("text", "transcription", "transcript"):
+            value = getattr(result, attr, None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        # Handle mapping/dict-style responses
+        if isinstance(result, dict):
+            for key in ("text", "transcription", "transcript"):
+                if key in result and isinstance(result[key], str) and result[key].strip():
+                    return result[key].strip()
+
+            # Some responses may include segment arrays
+            segments = result.get("segments") if isinstance(result.get("segments"), list) else None
+            if segments:
+                combined = " ".join(
+                    segment.get("text", "").strip()
+                    for segment in segments
+                    if isinstance(segment, dict)
+                ).strip()
+                if combined:
+                    return combined
+
+        return None
     
     def run(self):
         """Main application loop."""
@@ -237,7 +416,9 @@ class VisionPromptGlasses:
                 # Capture if gesture detected
                 if gesture_detected and corners:
                     self.capture_and_analyze(frame, corners)
+                    # Removed blocking waitKey call - continue with the frame feed
                     self.frame_detector.reset()
+                    # Directly continue with the next frames
                 
                 # Display frame
                 cv2.imshow('Vision-Prompt Glasses', overlay_frame)
