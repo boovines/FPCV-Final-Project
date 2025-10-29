@@ -77,3 +77,9 @@ temp/
 *.sqlite
 *.sqlite3
 
+# Vision-Prompt Glasses snapshots
+snapshots/
+*.jpg
+*.jpeg
+*.png
+
