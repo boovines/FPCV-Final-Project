@@ -14,14 +14,6 @@ from crop_utils import CropUtils
 from openai_client import OpenAIClient
 from dotenv import load_dotenv
 
-# TTS Integration
-try:
-    from tts_test.ai_response_tts import AIResponseTTS
-    TTS_AVAILABLE = True
-except ImportError:
-    TTS_AVAILABLE = False
-    print("Warning: TTS integration not available. Install tts_test module for audio output.")
-
 try:
     import speech_recognition as sr
 except ImportError:
@@ -42,17 +34,7 @@ class VisionPromptGlasses:
         self.frame_detector = FrameDetector()
         self.crop_utils = CropUtils()
         self.openai_client = OpenAIClient()
-
-        # Initialize TTS if available
-        self.tts = None
-        if TTS_AVAILABLE:
-            try:
-                self.tts = AIResponseTTS()
-                print("✅ TTS system initialized - AI responses will be spoken aloud")
-            except Exception as e:
-                print(f"⚠️  TTS initialization failed: {e}")
-                self.tts = None
-
+        
         # Camera setup
         self.cap = None
         self.is_running = False
@@ -217,10 +199,6 @@ class VisionPromptGlasses:
 
             if response:
                 print(f"\nAI Response:\n{response}\n")
-
-                # Speak the AI response if TTS is available
-                if self.tts:
-                    self.tts.speak_ai_response(response)
             else:
                 print("Failed to get response from AI.")
 
@@ -275,10 +253,6 @@ class VisionPromptGlasses:
 
             if response:
                 print(f"\nAI Response:\n{response}\n")
-
-                # Speak the AI response if TTS is available
-                if self.tts:
-                    self.tts.speak_ai_response(response)
             else:
                 print("Failed to get response from AI.")
 
@@ -623,7 +597,6 @@ class VisionPromptGlasses:
         print("- Hold the gesture steady for 2 seconds")
         print("- Press 'q' to quit, 'r' to reset, 's' to select cached snapshot")
         print("- Press 't' to test OpenAI connection")
-        print("- Press 'v' to test TTS system")
         print()
 
         # Initialize camera
@@ -695,13 +668,7 @@ class VisionPromptGlasses:
                         print("OpenAI connection test: SUCCESS")
                     else:
                         print("OpenAI connection test: FAILED")
-                elif key == ord('v'):
-                    if self.tts:
-                        self.tts.speak_ai_response("TTS test successful! The text-to-speech system is working correctly.")
-                        print("TTS test: SUCCESS - Check your speakers for audio output")
-                    else:
-                        print("TTS test: FAILED - TTS system not available")
-
+        
         except KeyboardInterrupt:
             print("\nInterrupted by user")
 

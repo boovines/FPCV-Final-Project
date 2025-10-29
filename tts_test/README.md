@@ -46,36 +46,11 @@ Example:
 python speak.py "Hello, how are you today?"
 ```
 
-### AI Response TTS Integration
-For speaking AI responses from your vision-prompt glasses:
-
-**Direct AI Response:**
-```bash
-python ai_response_tts.py "AI Response: Your AI response text here"
-```
-
-**Interactive Mode:**
-```bash
-python ai_response_tts.py
-# Then paste AI responses as they appear
-```
-
-**Pipe Mode (monitor command output):**
-```bash
-python pipe_ai_to_tts.py "python ../main.py"
-```
-
-**Vision Glasses with TTS:**
-```bash
-python vision_glasses_with_tts.py
-```
-
 ## Features
 
 - **Interactive text input** with voice selection
 - **Immediate audio playback** using ffmpeg
 - **Quick speak mode** for command-line usage
-- **AI Response TTS Integration** for vision-prompt glasses
 - **Voice selection** from available ElevenLabs voices
 - **Audio generation** with customizable voice settings
 - **MP3 output files** for saving generated speech
