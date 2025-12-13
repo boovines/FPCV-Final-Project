@@ -294,6 +294,9 @@ class VisionPromptGlasses:
                 print("Cropped image quality is too poor")
                 return
             
+            # Rotate image 90 degrees to the left (counterclockwise) - universal rotation for all snapshots
+            cropped_image = cv2.rotate(cropped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            
             # Save snapshot
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             snapshot_path = os.path.join(self.snapshots_dir, f"snapshot_{timestamp}.jpg")
@@ -384,12 +387,12 @@ class VisionPromptGlasses:
         """
         Mode 1: Google Drive Upload
         
-        Rotates image 90 degrees to the left, then uploads to Google Drive and announces completion via TTS.
+        Uploads snapshot to Google Drive and announces completion via TTS.
         
         Reference: https://developers.google.com/workspace/drive/api/guides/manage-uploads#simple
         
         Args:
-            cropped_image: Cropped numpy array image
+            cropped_image: Cropped numpy array image (already rotated 90° left)
             snapshot_path: File path where snapshot was saved
             image_base64: Base64-encoded image string for API calls
         """
@@ -398,26 +401,10 @@ class VisionPromptGlasses:
             print("  pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
             return
         
-        # Rotate image 90 degrees to the left (counterclockwise)
-        rotated_image = cv2.rotate(cropped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        print(f"[Mode 1] Uploading snapshot to Google Drive: {snapshot_path}")
         
-        # Save rotated image to a temporary file
-        temp_upload_path = snapshot_path.replace('.jpg', '_rotated.jpg')
-        if not cv2.imwrite(temp_upload_path, rotated_image):
-            print(f"[Mode 1] Failed to save rotated image to {temp_upload_path}")
-            return
-        
-        print(f"[Mode 1] Rotated image and uploading to Google Drive: {temp_upload_path}")
-        
-        # Upload rotated snapshot to Google Drive
-        upload_success = upload_snapshot_to_drive(temp_upload_path)
-        
-        # Clean up temporary rotated file
-        try:
-            if os.path.exists(temp_upload_path):
-                os.remove(temp_upload_path)
-        except Exception as e:
-            print(f"[Mode 1] Warning: Failed to clean up temporary file: {e}")
+        # Upload snapshot to Google Drive
+        upload_success = upload_snapshot_to_drive(snapshot_path)
         
         if upload_success:
             # Announce completion via TTS
