@@ -157,7 +157,53 @@ class CropUtils:
         cv2.rectangle(overlay_frame, (bar_x, bar_y), (bar_x + progress_width, bar_y + bar_height), color, -1)
         
         # Progress text
-        progress_text = f"Progress: {progress:.1%}"
+        progress_text = f"Frame: {progress:.1%}"
+        cv2.putText(overlay_frame, progress_text, (bar_x, bar_y + bar_height + 25), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        
+        return overlay_frame
+    
+    def draw_mode_switch_progress(self, frame: np.ndarray, progress: float, pending_mode: Optional[int]) -> np.ndarray:
+        """
+        Draw progress bar for mode switch gesture.
+        
+        Args:
+            frame: Input video frame
+            progress: Progress percentage (0.0 to 1.0)
+            pending_mode: The mode being switched to (None if no active switch)
+            
+        Returns:
+            Frame with progress bar drawn
+        """
+        overlay_frame = frame.copy()
+        
+        # Only draw if there's an active mode switch in progress
+        if pending_mode is None or progress <= 0.0:
+            return overlay_frame
+        
+        # Color based on progress (red -> yellow -> green)
+        if progress < 0.5:
+            color = (0, 0, 255)  # Red
+        elif progress < 1.0:
+            color = (0, 255, 255)  # Yellow
+        else:
+            color = (0, 255, 0)  # Green
+        
+        # Draw progress bar (positioned below the frame progress bar or in a different location)
+        bar_width = 200
+        bar_height = 20
+        bar_x = 10
+        bar_y = 50  # Position below the frame progress bar
+        
+        # Background bar
+        cv2.rectangle(overlay_frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), -1)
+        
+        # Progress bar
+        progress_width = int(bar_width * progress)
+        cv2.rectangle(overlay_frame, (bar_x, bar_y), (bar_x + progress_width, bar_y + bar_height), color, -1)
+        
+        # Progress text with mode info
+        progress_text = f"Mode {pending_mode}: {progress:.1%}"
         cv2.putText(overlay_frame, progress_text, (bar_x, bar_y + bar_height + 25), 
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
         

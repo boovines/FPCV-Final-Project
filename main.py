@@ -12,6 +12,7 @@ from mediapipe_utils import HandDetector
 from frame_detector import FrameDetector
 from crop_utils import CropUtils
 from openai_client import OpenAIClient
+from mode_switch_detector import ModeSwitchDetector
 from dotenv import load_dotenv
 
 try:
@@ -32,6 +33,7 @@ class VisionPromptGlasses:
         # Initialize components
         self.hand_detector = HandDetector()
         self.frame_detector = FrameDetector()
+        self.mode_detector = ModeSwitchDetector(hold_duration=1.0)
         self.crop_utils = CropUtils()
         self.openai_client = OpenAIClient()
         
@@ -689,14 +691,30 @@ class VisionPromptGlasses:
                     hand_data, finger_tips
                 )
                 
+                # Detect mode switch gesture (right hand only)
+                mode_state = self.mode_detector.update(hand_data)
+                
                 # Draw overlay
                 overlay_frame = self.crop_utils.draw_frame_overlay(annotated_frame, corners, progress)
+                
+                # Draw mode switch progress bar if a mode switch is in progress
+                overlay_frame = self.crop_utils.draw_mode_switch_progress(
+                    overlay_frame, mode_state.progress, mode_state.pending_mode
+                )
                 
                 # Add instructions overlay
                 cv2.putText(overlay_frame, "Form rectangle with both hands (thumb+index)", 
                            (10, overlay_frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 cv2.putText(overlay_frame, "Hold steady for 2 seconds", 
                            (10, overlay_frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                
+                # Display current mode in bottom-right corner
+                mode_text = f"Mode: {mode_state.current_mode}"
+                text_size = cv2.getTextSize(mode_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                text_x = overlay_frame.shape[1] - text_size[0] - 20
+                text_y = overlay_frame.shape[0] - 20
+                cv2.putText(overlay_frame, mode_text, (text_x, text_y), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                 
                 # Capture if gesture detected
                 if gesture_detected and corners:
