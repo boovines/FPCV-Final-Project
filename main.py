@@ -23,6 +23,13 @@ except ImportError:
     upload_snapshot_to_drive = None
 
 try:
+    from infobip_whatsapp_sender import send_snapshot_via_whatsapp
+    INFOBIP_AVAILABLE = True
+except ImportError:
+    INFOBIP_AVAILABLE = False
+    send_snapshot_via_whatsapp = None
+
+try:
     import speech_recognition as sr
 except ImportError:
     sr = None
@@ -416,23 +423,30 @@ class VisionPromptGlasses:
         """
         Mode 2: WhatsApp Send via InfoBip
         
-        Intended behavior (NOT IMPLEMENTED):
-        1. Send snapshot via WhatsApp using InfoBip HTTPS API
-        2. Announce completion via TTS
+        Sends snapshot as WhatsApp image message using InfoBip's HTTPS API and announces completion via TTS.
         
         Reference: https://www.infobip.com/docs/api/channels/whatsapp/whatsapp-outbound-messages/whatsapp-text-and-media-messages/send-whatsapp-image-message
         
         Args:
-            cropped_image: Cropped numpy array image
+            cropped_image: Cropped numpy array image (already rotated 90° left)
             snapshot_path: File path where snapshot was saved
             image_base64: Base64-encoded image string for API calls
         """
-        # TODO: Implement WhatsApp send via InfoBip
-        # TODO: - Authenticate with InfoBip API
-        # TODO: - Send image message using InfoBip WhatsApp API
-        # TODO: - Handle recipient phone number (may need user input or config)
-        # TODO: - Announce success via TTS (e.g., "Photo sent via WhatsApp")
-        print(f"[Mode 2] WhatsApp send not yet implemented for: {snapshot_path}")
+        if not INFOBIP_AVAILABLE or send_snapshot_via_whatsapp is None:
+            print("[Mode 2] InfoBip WhatsApp sender not available. Install required packages:")
+            print("  pip install requests")
+            return
+        
+        print(f"[Mode 2] Sending snapshot via WhatsApp: {snapshot_path}")
+        
+        # Send snapshot via WhatsApp using InfoBip
+        send_success = send_snapshot_via_whatsapp(snapshot_path)
+        
+        if send_success:
+            # Announce completion via TTS
+            self.output_ai_response("Upload completed.")
+        else:
+            print("[Mode 2] WhatsApp send failed. Check logs for details.")
 
     def handle_mode_3(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """

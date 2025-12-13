@@ -71,10 +71,16 @@ class GoogleDriveUploader:
         Authenticate with Google Drive API.
         
         Supports:
-        1. Service account (via GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_FILE)
-        2. OAuth 2.0 (via environment variables or JSON files):
+        1. Service account (preferred, no token.json needed):
+           - GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_FILE (path to service account JSON)
+        
+        2. OAuth 2.0 (via environment variables, no token.json needed by default):
            - GOOGLE_DRIVE_CREDENTIALS_JSON (JSON string) or credentials.json file
-           - GOOGLE_DRIVE_TOKEN_JSON (JSON string) or token.json file
+           - GOOGLE_DRIVE_TOKEN_JSON (JSON string) - preferred over token.json file
+           - GOOGLE_DRIVE_USE_TOKEN_FILE=true (optional, to enable token.json file usage)
+        
+        Note: By default, token.json file is NOT used. Set GOOGLE_DRIVE_USE_TOKEN_FILE=true
+        if you want to use token.json file instead of environment variables.
         """
         creds = None
         
@@ -95,11 +101,13 @@ class GoogleDriveUploader:
         
         # Fall back to OAuth 2.0 if service account not available
         if creds is None or not creds.valid:
-            # Try to load token from environment variable first, then file
+            # Try to load token from environment variable first, then file (if enabled)
             token_json = os.getenv('GOOGLE_DRIVE_TOKEN_JSON')
             token_path = os.getenv('GOOGLE_DRIVE_TOKEN_FILE', 'token.json')
+            use_token_file = os.getenv('GOOGLE_DRIVE_USE_TOKEN_FILE', 'false').lower() == 'true'
             
             # Load existing token if available
+            # Priority: 1) Environment variable, 2) File (only if enabled)
             if token_json:
                 try:
                     # Parse JSON string from environment variable
@@ -108,12 +116,16 @@ class GoogleDriveUploader:
                     logger.info("Loaded OAuth token from environment variable")
                 except (json.JSONDecodeError, ValueError, Exception) as e:
                     logger.warning(f"Failed to load token from environment variable: {e}")
-            elif os.path.exists(token_path):
+                    creds = None
+            
+            # Only check file if env var not set and file usage is enabled
+            if not creds and use_token_file and os.path.exists(token_path):
                 try:
                     creds = Credentials.from_authorized_user_file(token_path, SCOPES)
                     logger.info("Loaded OAuth token from file")
                 except Exception as e:
                     logger.warning(f"Failed to load existing token file: {e}")
+                    creds = None
             
             # Refresh or get new token
             if not creds or not creds.valid:
@@ -121,11 +133,16 @@ class GoogleDriveUploader:
                     try:
                         creds.refresh(Request())
                         logger.info("Refreshed OAuth token")
-                        # Save refreshed token (to file, since we can't modify env vars)
-                        if os.path.exists(token_path) or not token_json:
+                        # Only save to file if explicitly enabled
+                        if use_token_file:
                             with open(token_path, 'w') as token:
                                 token.write(creds.to_json())
                             logger.info(f"Saved refreshed token to {token_path}")
+                        elif token_json:
+                            logger.info(
+                                "Token refreshed. Update GOOGLE_DRIVE_TOKEN_JSON environment variable "
+                                "with the refreshed token to avoid re-authentication."
+                            )
                     except Exception as e:
                         logger.warning(f"Token refresh failed: {e}")
                         creds = None
@@ -161,18 +178,20 @@ class GoogleDriveUploader:
                             "Download credentials.json from Google Cloud Console."
                         )
                 
-                # Save token for future use (to file, since we can't modify parent process env vars)
+                # Save token for future use only if file-based storage is enabled
                 if creds:
-                    # Always save to file for persistence
-                    # Note: If using env vars, you'll need to manually update GOOGLE_DRIVE_TOKEN_JSON
-                    # with the new token after first authentication
-                    with open(token_path, 'w') as token:
-                        token.write(creds.to_json())
-                    logger.info(f"Saved OAuth token to {token_path}")
-                    if token_json:
+                    if use_token_file:
+                        # Save to file for persistence
+                        with open(token_path, 'w') as token:
+                            token.write(creds.to_json())
+                        logger.info(f"Saved OAuth token to {token_path}")
+                    else:
+                        # When using environment variables, log instructions instead
                         logger.info(
-                            "Note: Token saved to file. To use environment variable, "
-                            f"update GOOGLE_DRIVE_TOKEN_JSON with the contents of {token_path}"
+                            "OAuth authentication completed. To avoid re-authentication, set "
+                            "GOOGLE_DRIVE_TOKEN_JSON environment variable with the following JSON:\n"
+                            f"{creds.to_json()}\n"
+                            "Alternatively, set GOOGLE_DRIVE_USE_TOKEN_FILE=true to save token to file."
                         )
         
         if not creds or not creds.valid:
