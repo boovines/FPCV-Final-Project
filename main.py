@@ -16,6 +16,13 @@ from mode_switch_detector import ModeSwitchDetector
 from dotenv import load_dotenv
 
 try:
+    from google_drive_uploader import upload_snapshot_to_drive
+    GOOGLE_DRIVE_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_AVAILABLE = False
+    upload_snapshot_to_drive = None
+
+try:
     import speech_recognition as sr
 except ImportError:
     sr = None
@@ -260,8 +267,15 @@ class VisionPromptGlasses:
         except Exception as e:
             print(f"Error processing cached snapshot: {e}")
     
-    def capture_and_analyze(self, frame: np.ndarray, corners: list):
-        """Capture the framed region and send to OpenAI for analysis."""
+    def capture_and_analyze(self, frame: np.ndarray, corners: list, mode: int = 0):
+        """
+        Capture the framed region and route to appropriate mode handler.
+        
+        Args:
+            frame: Video frame containing the gesture
+            corners: Corner points of the detected rectangle gesture
+            mode: Current active mode (0-4)
+        """
         current_time = time.time()
         
         # Check cooldown
@@ -296,26 +310,186 @@ class VisionPromptGlasses:
                 print("Failed to encode image")
                 return
             
-            # Get spoken user prompt via ElevenLabs speech-to-text
-            prompt = self.capture_spoken_prompt()
-            if not prompt:
-                print("No spoken prompt captured.")
-                return
-            
-            # Send to OpenAI
-            print("Analyzing image...")
-            response = self.openai_client.analyze_with_default_prompt(image_base64, prompt)
-            
-            if response:
-                self.output_ai_response(response)
-            else:
-                print("Failed to get response from AI.")
+            # Route snapshot to appropriate mode handler
+            self.handle_snapshot(
+                cropped_image=cropped_image,
+                snapshot_path=snapshot_path,
+                image_base64=image_base64,
+                mode=mode
+            )
             
             # Update cooldown
             self.last_capture_time = current_time
             
         except Exception as e:
             print(f"Error in capture and analyze: {e}")
+
+    def handle_snapshot(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str, mode: int):
+        """
+        Central router for snapshot handling based on active mode.
+        
+        This function dispatches snapshot processing to the appropriate mode handler.
+        Each mode has a clearly defined responsibility and implementation pathway.
+        
+        Args:
+            cropped_image: Cropped numpy array image
+            snapshot_path: File path where snapshot was saved
+            image_base64: Base64-encoded image string for API calls
+            mode: Current active mode (0-4)
+        """
+        if mode == 0:
+            self.handle_mode_0(cropped_image, snapshot_path, image_base64)
+        elif mode == 1:
+            self.handle_mode_1(cropped_image, snapshot_path, image_base64)
+        elif mode == 2:
+            self.handle_mode_2(cropped_image, snapshot_path, image_base64)
+        elif mode == 3:
+            self.handle_mode_3(cropped_image, snapshot_path, image_base64)
+        elif mode == 4:
+            self.handle_mode_4(cropped_image, snapshot_path, image_base64)
+        else:
+            print(f"Unknown mode: {mode}. Defaulting to mode 0.")
+            self.handle_mode_0(cropped_image, snapshot_path, image_base64)
+
+    def handle_mode_0(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
+        """
+        Mode 0: AI Processing with STT/TTS
+        
+        Existing behavior - processes snapshot through:
+        1. Speech-to-text (capture spoken prompt)
+        2. OpenAI vision analysis
+        3. Text-to-speech (announce AI response)
+        
+        Args:
+            cropped_image: Cropped numpy array image
+            snapshot_path: File path where snapshot was saved
+            image_base64: Base64-encoded image string for API calls
+        """
+        # Get spoken user prompt via ElevenLabs speech-to-text
+        prompt = self.capture_spoken_prompt()
+        if not prompt:
+            print("No spoken prompt captured.")
+            return
+        
+        # Send to OpenAI
+        print("Analyzing image...")
+        response = self.openai_client.analyze_with_default_prompt(image_base64, prompt)
+        
+        if response:
+            self.output_ai_response(response)
+        else:
+            print("Failed to get response from AI.")
+
+    def handle_mode_1(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
+        """
+        Mode 1: Google Drive Upload
+        
+        Rotates image 90 degrees to the left, then uploads to Google Drive and announces completion via TTS.
+        
+        Reference: https://developers.google.com/workspace/drive/api/guides/manage-uploads#simple
+        
+        Args:
+            cropped_image: Cropped numpy array image
+            snapshot_path: File path where snapshot was saved
+            image_base64: Base64-encoded image string for API calls
+        """
+        if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_to_drive is None:
+            print("[Mode 1] Google Drive upload not available. Install required packages:")
+            print("  pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+            return
+        
+        # Rotate image 90 degrees to the left (counterclockwise)
+        rotated_image = cv2.rotate(cropped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        
+        # Save rotated image to a temporary file
+        temp_upload_path = snapshot_path.replace('.jpg', '_rotated.jpg')
+        if not cv2.imwrite(temp_upload_path, rotated_image):
+            print(f"[Mode 1] Failed to save rotated image to {temp_upload_path}")
+            return
+        
+        print(f"[Mode 1] Rotated image and uploading to Google Drive: {temp_upload_path}")
+        
+        # Upload rotated snapshot to Google Drive
+        upload_success = upload_snapshot_to_drive(temp_upload_path)
+        
+        # Clean up temporary rotated file
+        try:
+            if os.path.exists(temp_upload_path):
+                os.remove(temp_upload_path)
+        except Exception as e:
+            print(f"[Mode 1] Warning: Failed to clean up temporary file: {e}")
+        
+        if upload_success:
+            # Announce completion via TTS
+            self.output_ai_response("Upload completed.")
+        else:
+            print("[Mode 1] Upload failed. Check logs for details.")
+
+    def handle_mode_2(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
+        """
+        Mode 2: WhatsApp Send via InfoBip
+        
+        Intended behavior (NOT IMPLEMENTED):
+        1. Send snapshot via WhatsApp using InfoBip HTTPS API
+        2. Announce completion via TTS
+        
+        Reference: https://www.infobip.com/docs/api/channels/whatsapp/whatsapp-outbound-messages/whatsapp-text-and-media-messages/send-whatsapp-image-message
+        
+        Args:
+            cropped_image: Cropped numpy array image
+            snapshot_path: File path where snapshot was saved
+            image_base64: Base64-encoded image string for API calls
+        """
+        # TODO: Implement WhatsApp send via InfoBip
+        # TODO: - Authenticate with InfoBip API
+        # TODO: - Send image message using InfoBip WhatsApp API
+        # TODO: - Handle recipient phone number (may need user input or config)
+        # TODO: - Announce success via TTS (e.g., "Photo sent via WhatsApp")
+        print(f"[Mode 2] WhatsApp send not yet implemented for: {snapshot_path}")
+
+    def handle_mode_3(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
+        """
+        Mode 3: Location Detection
+        
+        Intended behavior (NOT IMPLEMENTED):
+        1. Determine the physical location where the photo was taken
+        2. Announce location via TTS
+        
+        Reference: https://developers.google.com/maps/documentation/places/web-service/overview
+        
+        Args:
+            cropped_image: Cropped numpy array image
+            snapshot_path: File path where snapshot was saved
+            image_base64: Base64-encoded image string for API calls
+        """
+        # TODO: Implement location detection
+        # TODO: - Extract EXIF GPS data if available
+        # TODO: - Use Google Places API or similar to identify location
+        # TODO: - Convert coordinates to human-readable address/place name
+        # TODO: - Announce location via TTS (e.g., "Photo taken at Central Park, New York")
+        print(f"[Mode 3] Location detection not yet implemented for: {snapshot_path}")
+
+    def handle_mode_4(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
+        """
+        Mode 4: Visual Product Search
+        
+        Intended behavior (NOT IMPLEMENTED):
+        1. Find visually similar products using Google Cloud Vision Product Search
+        2. Print user-friendly results to terminal
+        
+        Reference: https://docs.cloud.google.com/vision/product-search/docs/create-product-set-search-products
+        
+        Args:
+            cropped_image: Cropped numpy array image
+            snapshot_path: File path where snapshot was saved
+            image_base64: Base64-encoded image string for API calls
+        """
+        # TODO: Implement visual product search
+        # TODO: - Authenticate with Google Cloud Vision API
+        # TODO: - Create/use product set and catalog
+        # TODO: - Perform product search on image
+        # TODO: - Format and print results to terminal (product names, prices, links, etc.)
+        print(f"[Mode 4] Visual product search not yet implemented for: {snapshot_path}")
 
     def capture_spoken_prompt(self) -> Optional[str]:
         """Record the user's spoken question and transcribe it via ElevenLabs."""
@@ -718,7 +892,7 @@ class VisionPromptGlasses:
                 
                 # Capture if gesture detected
                 if gesture_detected and corners:
-                    self.capture_and_analyze(frame, corners)
+                    self.capture_and_analyze(frame, corners, mode_state.current_mode)
                     # Removed blocking waitKey call - continue with the frame feed
                     self.frame_detector.reset()
                     # Directly continue with the next frames

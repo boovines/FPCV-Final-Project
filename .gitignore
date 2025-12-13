@@ -83,3 +83,5 @@ snapshots/
 *.jpeg
 *.png
 
+token.json
+

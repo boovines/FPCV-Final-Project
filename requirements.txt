@@ -11,3 +11,8 @@ SpeechRecognition
 PyAudio
 elevenlabs
 mpv
+
+# Google Drive API (for Mode 1)
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
