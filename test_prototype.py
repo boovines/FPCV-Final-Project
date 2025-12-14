@@ -19,16 +19,12 @@ from crop_utils import CropUtils
 from openai_client import OpenAIClient
 
 def test_hand_detector():
-    """Test MediaPipe hand detection with a dummy frame."""
+    """Test MediaPipe hand detection."""
     print("Testing HandDetector...")
     
     try:
         detector = HandDetector()
-        
-        # Create a dummy frame
         dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        
-        # Process frame
         annotated_frame, hand_data = detector.process_frame(dummy_frame)
         
         print(f"✓ HandDetector initialized successfully")
@@ -43,13 +39,11 @@ def test_hand_detector():
         return False
 
 def test_frame_detector():
-    """Test frame detection logic."""
+    """Test frame detection."""
     print("\nTesting FrameDetector...")
     
     try:
         detector = FrameDetector()
-        
-        # Test with dummy hand data (no hands)
         dummy_hand_data = []
         dummy_finger_tips = {'left': None, 'right': None}
         
@@ -68,26 +62,19 @@ def test_frame_detector():
         return False
 
 def test_crop_utils():
-    """Test image cropping and encoding utilities."""
+    """Test image cropping and encoding."""
     print("\nTesting CropUtils...")
     
     try:
         crop_utils = CropUtils()
-        
-        # Create a dummy frame
         dummy_frame = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-        
-        # Test with dummy corners
         dummy_corners = [(100, 100), (200, 100), (200, 200), (100, 200)]
-        
-        # Test cropping
         cropped = crop_utils.crop_frame_region(dummy_frame, dummy_corners)
         
         if cropped is not None:
             print(f"✓ CropUtils initialized successfully")
             print(f"✓ Cropped image shape: {cropped.shape}")
             
-            # Test base64 encoding
             encoded = crop_utils.encode_image_to_base64(cropped)
             if encoded:
                 print(f"✓ Base64 encoding successful (length: {len(encoded)})")
@@ -105,13 +92,12 @@ def test_crop_utils():
         return False
 
 def test_openai_client():
-    """Test OpenAI client connection."""
+    """Test OpenAI client."""
     print("\nTesting OpenAIClient...")
     
     try:
         client = OpenAIClient()
         
-        # Test connection
         if client.test_connection():
             print("✓ OpenAIClient initialized successfully")
             print("✓ OpenAI API connection successful")
@@ -125,7 +111,7 @@ def test_openai_client():
         return False
 
 def test_snapshots_directory():
-    """Test snapshots directory creation."""
+    """Test snapshots directory."""
     print("\nTesting snapshots directory...")
     
     try:
@@ -137,7 +123,6 @@ def test_snapshots_directory():
         else:
             print(f"✓ Snapshots directory exists: {snapshots_dir}")
         
-        # Test write permissions
         test_file = os.path.join(snapshots_dir, "test.txt")
         with open(test_file, 'w') as f:
             f.write("test")
@@ -151,7 +136,6 @@ def test_snapshots_directory():
         return False
 
 def main():
-    """Run all tests."""
     print("Vision-Prompt Glasses Prototype - Test Suite")
     print("=" * 50)
     

@@ -53,45 +53,37 @@ except ImportError:
 class VisionPromptGlasses:
     def __init__(self):
         """Initialize the Vision-Prompt Glasses prototype."""
-        # Initialize components
         self.hand_detector = HandDetector()
         self.frame_detector = FrameDetector()
         self.mode_detector = ModeSwitchDetector(hold_duration=1.0)
         self.crop_utils = CropUtils()
         self.openai_client = OpenAIClient()
         
-        # Camera setup
         self.cap = None
         self.is_running = False
         
-        # Create snapshots directory
         self.snapshots_dir = "snapshots"
         os.makedirs(self.snapshots_dir, exist_ok=True)
         
-        # State tracking
         self.last_capture_time = 0
-        self.capture_cooldown = 3.0  # seconds between captures
+        self.capture_cooldown = 3.0
 
-        # Load environment variables (useful when running outside CLI context)
         load_dotenv()
 
-        # Verify speech recognition dependency
         if sr is None:
             raise ImportError(
                 "speech_recognition package is required for voice input. "
                 "Install it with 'pip install SpeechRecognition' and ensure PyAudio dependencies are available."
             )
 
-        # Speech recognition configuration
         self.recognizer = sr.Recognizer()
-        self.recognizer.pause_threshold = 1.0  # Stop after ~1s silence
+        self.recognizer.pause_threshold = 1.0
         self.recognizer.non_speaking_duration = 0.4
         self.recognizer.dynamic_energy_threshold = True
         self.audio_sample_rate = 16000
         self.listen_timeout = float(os.getenv("ELEVENLABS_LISTEN_TIMEOUT", 12))
         self.max_listen_duration = float(os.getenv("ELEVENLABS_MAX_LISTEN_SECONDS", 25))
 
-        # ElevenLabs configuration
         self.eleven_api_key = (
             os.getenv("ELEVENLABS_API_KEY")
             or os.getenv("ELEVEN_API_KEY")
@@ -123,7 +115,6 @@ class VisionPromptGlasses:
             "https://api.elevenlabs.io/v1/speech-to-text",
         )
 
-        # Initialize ElevenLabs SDK if available (REST fallback otherwise)
         self.eleven_client = None
         self.tts_ready = False
 
@@ -135,11 +126,9 @@ class VisionPromptGlasses:
             try:
                 self.eleven_client = ElevenLabs(api_key=self.eleven_api_key)
                 self.tts_ready = bool(self.eleven_tts_voice_id)
-                # If no voice configured, attempt to pick the first available voice
                 if not self.tts_ready:
                     try:
                         selected_voice = None
-                        # Try SDK listing first
                         voices = getattr(self.eleven_client, "voices", None)
                         list_method = getattr(voices, "list", None) if voices else None
                         if callable(list_method):
@@ -156,7 +145,6 @@ class VisionPromptGlasses:
                                 if vid:
                                     selected_voice = vid
                                     break
-                        # Fallback to REST if SDK listing is unavailable
                         if selected_voice is None:
                             rest = requests.get(
                                 "https://api.elevenlabs.io/v1/voices",
@@ -181,7 +169,6 @@ class VisionPromptGlasses:
             except Exception as sdk_error:
                 print(f"Warning: ElevenLabs SDK initialization failed ({sdk_error}). Falling back to REST API calls.")
 
-        # Provide actionable guidance if local PCM playback is configured but PyAudio is missing
         if self.use_local_tts_playback:
             try:
                 import pyaudio  # noqa: F401
@@ -199,7 +186,6 @@ class VisionPromptGlasses:
                 print("Error: Could not open webcam")
                 return False
             
-            # Set camera properties
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             self.cap.set(cv2.CAP_PROP_FPS, 30)
@@ -253,25 +239,21 @@ class VisionPromptGlasses:
     def process_cached_snapshot(self, snapshot_path: str):
         """Process a cached snapshot with OpenAI."""
         try:
-            # Load image
             image = cv2.imread(snapshot_path)
             if image is None:
                 print(f"Could not load image: {snapshot_path}")
                 return
             
-            # Encode to base64
             image_base64 = self.crop_utils.encode_image_to_base64(image)
             if not image_base64:
                 print("Failed to encode image")
                 return
             
-            # Get user prompt
             prompt = input(f"\nEnter your question about the image '{os.path.basename(snapshot_path)}': ")
             if not prompt.strip():
                 print("No prompt provided.")
                 return
             
-            # Send to OpenAI
             print("Analyzing image...")
             response = self.openai_client.analyze_with_default_prompt(image_base64, prompt)
             
@@ -284,36 +266,24 @@ class VisionPromptGlasses:
             print(f"Error processing cached snapshot: {e}")
     
     def capture_and_analyze(self, frame: np.ndarray, corners: list, mode: int = 0):
-        """
-        Capture the framed region and route to appropriate mode handler.
-        
-        Args:
-            frame: Video frame containing the gesture
-            corners: Corner points of the detected rectangle gesture
-            mode: Current active mode (0-4)
-        """
+        """Capture the framed region and route to appropriate mode handler."""
         current_time = time.time()
         
-        # Check cooldown
         if current_time - self.last_capture_time < self.capture_cooldown:
             return
         
         try:
-            # Crop the framed region
             cropped_image = self.crop_utils.crop_frame_region(frame, corners)
             if cropped_image is None:
                 print("Failed to crop image")
                 return
             
-            # Validate crop quality
             if not self.crop_utils.validate_crop_quality(cropped_image):
                 print("Cropped image quality is too poor")
                 return
             
-            # Rotate image 90 degrees to the left (counterclockwise) - universal rotation for all snapshots
             cropped_image = cv2.rotate(cropped_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
             
-            # Save snapshot
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             snapshot_path = os.path.join(self.snapshots_dir, f"snapshot_{timestamp}.jpg")
             
@@ -323,13 +293,11 @@ class VisionPromptGlasses:
             
             print(f"\nSnapshot saved: {snapshot_path}")
             
-            # Encode image for API
             image_base64 = self.crop_utils.encode_image_to_base64(cropped_image)
             if not image_base64:
                 print("Failed to encode image")
                 return
             
-            # Route snapshot to appropriate mode handler
             self.handle_snapshot(
                 cropped_image=cropped_image,
                 snapshot_path=snapshot_path,
@@ -337,25 +305,13 @@ class VisionPromptGlasses:
                 mode=mode
             )
             
-            # Update cooldown
             self.last_capture_time = current_time
             
         except Exception as e:
             print(f"Error in capture and analyze: {e}")
 
     def handle_snapshot(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str, mode: int):
-        """
-        Central router for snapshot handling based on active mode.
-        
-        This function dispatches snapshot processing to the appropriate mode handler.
-        Each mode has a clearly defined responsibility and implementation pathway.
-        
-        Args:
-            cropped_image: Cropped numpy array image
-            snapshot_path: File path where snapshot was saved
-            image_base64: Base64-encoded image string for API calls
-            mode: Current active mode (0-4)
-        """
+        """Route snapshot to appropriate mode handler."""
         if mode == 0:
             self.handle_mode_0(cropped_image, snapshot_path, image_base64)
         elif mode == 1:
@@ -371,26 +327,12 @@ class VisionPromptGlasses:
             self.handle_mode_0(cropped_image, snapshot_path, image_base64)
 
     def handle_mode_0(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """
-        Mode 0: AI Processing with STT/TTS
-        
-        Existing behavior - processes snapshot through:
-        1. Speech-to-text (capture spoken prompt)
-        2. OpenAI vision analysis
-        3. Text-to-speech (announce AI response)
-        
-        Args:
-            cropped_image: Cropped numpy array image
-            snapshot_path: File path where snapshot was saved
-            image_base64: Base64-encoded image string for API calls
-        """
-        # Get spoken user prompt via ElevenLabs speech-to-text
+        """Mode 0: AI Processing with STT/TTS"""
         prompt = self.capture_spoken_prompt()
         if not prompt:
             print("No spoken prompt captured.")
             return
         
-        # Send to OpenAI
         print("Analyzing image...")
         response = self.openai_client.analyze_with_default_prompt(image_base64, prompt)
         
@@ -400,18 +342,7 @@ class VisionPromptGlasses:
             print("Failed to get response from AI.")
 
     def handle_mode_1(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """
-        Mode 1: Google Drive Upload
-        
-        Uploads snapshot to Google Drive and announces completion via TTS.
-        
-        Reference: https://developers.google.com/workspace/drive/api/guides/manage-uploads#simple
-        
-        Args:
-            cropped_image: Cropped numpy array image (already rotated 90° left)
-            snapshot_path: File path where snapshot was saved
-            image_base64: Base64-encoded image string for API calls
-        """
+        """Mode 1: Google Drive Upload"""
         if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_to_drive is None:
             print("[Mode 1] Google Drive upload not available. Install required packages:")
             print("  pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
@@ -419,27 +350,15 @@ class VisionPromptGlasses:
         
         print(f"[Mode 1] Uploading snapshot to Google Drive: {snapshot_path}")
         
-        # Upload snapshot to Google Drive
         upload_success = upload_snapshot_to_drive(snapshot_path)
         
         if upload_success:
-            # Announce completion via TTS
             self.output_ai_response("Upload completed.")
         else:
             print("[Mode 1] Upload failed. Check logs for details.")
 
     def handle_mode_2(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """
-        Mode 2: Google Drive Upload and iMessage Link
-        
-        Uploads snapshot to Google Drive and sends the shareable link via iMessage/SMS.
-        Announces completion via TTS.
-        
-        Args:
-            cropped_image: Cropped numpy array image (already rotated 90° left)
-            snapshot_path: File path where snapshot was saved
-            image_base64: Base64-encoded image string for API calls
-        """
+        """Mode 2: Google Drive Upload and iMessage Link"""
         if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_and_get_link is None:
             print("[Mode 2] Google Drive uploader not available.")
             print("  Install required packages and configure Google Drive API credentials.")
@@ -453,7 +372,6 @@ class VisionPromptGlasses:
         
         print(f"[Mode 2] Uploading snapshot to Google Drive: {snapshot_path}")
         
-        # Upload snapshot to Google Drive and get shareable link
         shareable_link = upload_snapshot_and_get_link(snapshot_path)
         
         if not shareable_link:
@@ -464,33 +382,18 @@ class VisionPromptGlasses:
         print(f"[Mode 2] Upload successful. Shareable link: {shareable_link}")
         print(f"[Mode 2] Sending link via iMessage/SMS")
         
-        # Send shareable link via iMessage/SMS
         send_success = send_text_via_imessage(shareable_link)
         
         if send_success:
-            # Announce completion via TTS
             self.output_ai_response("Photo sent")
         else:
             print("[Mode 2] iMessage send failed. Check logs for details.")
             self.output_ai_response("Photo uploaded but failed to send link")
 
     def handle_mode_3(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """
-        Mode 3: Location Detection
-        
-        Determines the physical location where the photo was taken by sending the image
-        to OpenAI Vision API with a prompt asking to identify the location.
-        Announces the location via TTS.
-        
-        Args:
-            cropped_image: Cropped numpy array image (already rotated 90° left)
-            snapshot_path: File path where snapshot was saved
-            image_base64: Base64-encoded image string for API calls
-        """
+        """Mode 3: Location Detection"""
         print(f"[Mode 3] Detecting location from snapshot: {snapshot_path}")
         
-        # Use OpenAI to identify location from image
-        # NOTE: The image is sent ONLY to OpenAI Vision API, not to Google Maps API
         location_prompt = "Look at the contextual image. Guess where this is. Give a short answer, limited to 5 words, that just includes the region, city, country, etc."
         
         try:
@@ -500,15 +403,11 @@ class VisionPromptGlasses:
             )
             
             if location:
-                # Clean up the response (remove any extra whitespace/newlines)
                 location = location.strip()
-                # Announce location via TTS
-                # Format as a natural sentence
                 location_message = f"The location is probably near {location}."
                 self.output_ai_response(location_message)
                 print(f"[Mode 3] Detected location: {location}")
             else:
-                # Announce graceful failure via TTS
                 self.output_ai_response("Unable to determine location.")
                 print("[Mode 3] Unable to determine location.")
         except Exception as e:
@@ -516,18 +415,7 @@ class VisionPromptGlasses:
             self.output_ai_response("Unable to determine location.")
 
     def handle_mode_4(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """
-        Mode 4: Visual Product Search with SerpAPI Google Shopping
-        
-        Searches for top 3 products that visually resemble the image.
-        Uses OpenAI Vision API for product analysis and ranking.
-        Uses SerpAPI Google Shopping Light API for product discovery.
-        
-        Args:
-            cropped_image: Cropped numpy array image (already rotated 90° left)
-            snapshot_path: File path where snapshot was saved
-            image_base64: Base64-encoded image string for API calls
-        """
+        """Mode 4: Visual Product Search with SerpAPI Google Shopping"""
         if not PRODUCT_SEARCH_AVAILABLE or search_similar_products is None:
             print("[Mode 4] Product search not available.")
             self.output_ai_response("Product search is not available.")
@@ -591,7 +479,6 @@ class VisionPromptGlasses:
         try:
             with sr.Microphone(sample_rate=self.audio_sample_rate) as source:
                 print("\nListening... (speak your question)")
-                # Calibrate to ambient noise for more reliable detection
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
 
                 try:
@@ -626,11 +513,10 @@ class VisionPromptGlasses:
             return None
 
     def transcribe_audio_with_elevenlabs(self, audio_bytes: bytes) -> Optional[str]:
-        """Send recorded audio to ElevenLabs Speech-to-Text and return the transcript."""
+        """Send recorded audio to ElevenLabs Speech-to-Text."""
         if not audio_bytes:
             return None
 
-        # Attempt SDK transcription first
         if self.eleven_client is not None:
             audio_buffer = io.BytesIO(audio_bytes)
             audio_buffer.name = "question.wav"
@@ -647,7 +533,6 @@ class VisionPromptGlasses:
             except Exception as sdk_error:
                 print(f"ElevenLabs SDK transcription error: {sdk_error}. Falling back to REST API.")
 
-        # REST API fallback using requests
         try:
             response = requests.post(
                 self.eleven_stt_endpoint,
@@ -679,23 +564,19 @@ class VisionPromptGlasses:
 
     @staticmethod
     def _extract_transcript_from_result(result: Optional[object]) -> Optional[str]:
-        """Normalize various ElevenLabs STT response styles to a plain string."""
         if result is None:
             return None
 
-        # Handle SDK response objects (may expose `.text` or `.transcription`)
         for attr in ("text", "transcription", "transcript"):
             value = getattr(result, attr, None)
             if isinstance(value, str) and value.strip():
                 return value.strip()
 
-        # Handle mapping/dict-style responses
         if isinstance(result, dict):
             for key in ("text", "transcription", "transcript"):
                 if key in result and isinstance(result[key], str) and result[key].strip():
                     return result[key].strip()
 
-            # Some responses may include segment arrays
             segments = result.get("segments") if isinstance(result.get("segments"), list) else None
             if segments:
                 combined = " ".join(
@@ -710,7 +591,6 @@ class VisionPromptGlasses:
 
     @staticmethod
     def _infer_sample_rate(output_format: Optional[str]) -> int:
-        """Extract the PCM sample rate from ElevenLabs output format strings."""
         default_rate = 16000
 
         if not output_format or "pcm" not in output_format:
@@ -739,7 +619,6 @@ class VisionPromptGlasses:
 
     @staticmethod
     def _materialize_audio_chunks(audio_candidate: Optional[object]) -> tuple:
-        """Materialize potentially streaming audio payloads into a tuple for reuse."""
         if audio_candidate is None:
             return tuple()
 
@@ -757,7 +636,6 @@ class VisionPromptGlasses:
 
     @staticmethod
     def _extract_audio_payload(chunk: Optional[object]) -> Optional[object]:
-        """Pull the actual audio field out of various ElevenLabs chunk shapes."""
         if chunk is None:
             return None
 
@@ -771,7 +649,6 @@ class VisionPromptGlasses:
 
     @staticmethod
     def _collect_audio_bytes(audio_chunks: tuple) -> bytes:
-        """Decode base64/audio chunks into raw bytes."""
         if not audio_chunks:
             return b""
 
@@ -795,7 +672,6 @@ class VisionPromptGlasses:
 
     @staticmethod
     def _play_audio_bytes(audio_bytes: bytes, sample_rate: int) -> bool:
-        """Play raw PCM audio bytes using PyAudio."""
         if not audio_bytes:
             return False
 
@@ -840,13 +716,12 @@ class VisionPromptGlasses:
                     pass
     
     def output_ai_response(self, ai_response: Optional[str]):
-        """Stream the AI response via ElevenLabs TTS and print it as a fallback."""
+        """Stream the AI response via ElevenLabs TTS."""
         if not ai_response:
             return
 
         if self.tts_ready and self.eleven_client is not None and stream is not None:
             try:
-                # --- begin TTS via ElevenLabs streaming ---
                 tts_api = self.eleven_client.text_to_speech
 
                 call_kwargs = {
@@ -903,9 +778,7 @@ class VisionPromptGlasses:
                         playback_success = self._play_audio_bytes(audio_bytes, self.eleven_tts_sample_rate)
 
                 if not playback_success:
-                    # Use ElevenLabs SDK streaming playback as a fallback
                     stream(chunk for chunk in audio_chunks)
-                # --- end TTS via ElevenLabs streaming ---
             except Exception as tts_error:
                 print(f"[TTS stream error] {tts_error}")
                 print(f"\nResponse:\n{ai_response}\n")
@@ -943,41 +816,30 @@ class VisionPromptGlasses:
         
         try:
             while self.is_running:
-                # Read frame
                 ret, frame = self.cap.read()
                 if not ret:
                     print("Failed to read frame from camera")
                     break
                 
-                # Process frame with MediaPipe
                 annotated_frame, hand_data = self.hand_detector.process_frame(frame)
-                
-                # Get finger tips
                 finger_tips = self.hand_detector.get_finger_tips(hand_data)
                 
-                # Detect frame gesture
                 gesture_detected, corners, progress = self.frame_detector.detect_frame_gesture(
                     hand_data, finger_tips
                 )
                 
-                # Detect mode switch gesture (right hand only)
                 mode_state = self.mode_detector.update(hand_data)
                 
-                # Draw overlay
                 overlay_frame = self.crop_utils.draw_frame_overlay(annotated_frame, corners, progress)
-                
-                # Draw mode switch progress bar if a mode switch is in progress
                 overlay_frame = self.crop_utils.draw_mode_switch_progress(
                     overlay_frame, mode_state.progress, mode_state.pending_mode
                 )
                 
-                # Add instructions overlay
                 cv2.putText(overlay_frame, "Form rectangle with both hands (thumb+index)", 
                            (10, overlay_frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 cv2.putText(overlay_frame, "Hold steady for 2 seconds", 
                            (10, overlay_frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 
-                # Display current mode in bottom-right corner
                 mode_text = f"Mode: {mode_state.current_mode}"
                 text_size = cv2.getTextSize(mode_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
                 text_x = overlay_frame.shape[1] - text_size[0] - 20
@@ -985,17 +847,12 @@ class VisionPromptGlasses:
                 cv2.putText(overlay_frame, mode_text, (text_x, text_y), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
                 
-                # Capture if gesture detected
                 if gesture_detected and corners:
                     self.capture_and_analyze(frame, corners, mode_state.current_mode)
-                    # Removed blocking waitKey call - continue with the frame feed
                     self.frame_detector.reset()
-                    # Directly continue with the next frames
                 
-                # Display frame
                 cv2.imshow('Vision-Prompt Glasses', overlay_frame)
                 
-                # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     break

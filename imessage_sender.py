@@ -21,18 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 def send_snapshot_via_imessage(snapshot_path: str) -> bool:
-    """
-    Send a text message "Hello" via iMessage/SMS using macOS Messages.app.
-    
-    Sends as iMessage if recipient is on Apple, otherwise falls back to SMS.
-    
-    Args:
-        snapshot_path: Path to the snapshot image file (ignored, kept for compatibility)
-    
-    Returns:
-        True if message sent successfully, False otherwise
-    """
-    # Get recipient phone number from environment variable
+    """Send a text message "Hello" via iMessage/SMS."""
     recipient_phone = os.getenv('IMESSAGE_RECIPIENT')
     
     if not recipient_phone:
@@ -43,9 +32,6 @@ def send_snapshot_via_imessage(snapshot_path: str) -> bool:
         return False
     
     try:
-        # AppleScript to send text "Hello" via Messages.app
-        # Tries iMessage first, then falls back to SMS if needed
-        # Uses System Events to ensure message is actually sent (not just in outbox)
         script = f'''
         tell application "Messages"
             activate
@@ -154,18 +140,7 @@ def send_snapshot_via_imessage(snapshot_path: str) -> bool:
 
 
 def send_text_via_imessage(text: str) -> bool:
-    """
-    Send a text message via iMessage/SMS using macOS Messages.app.
-    
-    Sends as iMessage if recipient is on Apple, otherwise falls back to SMS.
-    
-    Args:
-        text: Text message to send
-    
-    Returns:
-        True if message sent successfully, False otherwise
-    """
-    # Get recipient phone number from environment variable
+    """Send a text message via iMessage/SMS."""
     recipient_phone = os.getenv('IMESSAGE_RECIPIENT')
     
     if not recipient_phone:
@@ -175,13 +150,9 @@ def send_text_via_imessage(text: str) -> bool:
         )
         return False
     
-    # Escape quotes in text for AppleScript
     escaped_text = text.replace('"', '\\"')
     
     try:
-        # AppleScript to send text via Messages.app
-        # Tries iMessage first, then falls back to SMS if needed
-        # Uses System Events to ensure message is actually sent (not just in outbox)
         script = f'''
         tell application "Messages"
             activate
@@ -290,17 +261,7 @@ def send_text_via_imessage(text: str) -> bool:
 
 
 def send_text_and_image(phone: str, text: str, image_path: str) -> bool:
-    """
-    Send both text and image via iMessage/SMS.
-    
-    Args:
-        phone: Recipient phone number
-        text: Text message to send
-        image_path: Path to image file
-    
-    Returns:
-        True if sent successfully, False otherwise
-    """
+    """Send both text and image via iMessage/SMS."""
     image_path_resolved = Path(image_path).resolve()
     
     try:

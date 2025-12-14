@@ -61,15 +61,7 @@ class ModeSwitchDetector:
         self.last_detected_mode: Optional[int] = None
 
     def update(self, hand_data: List[Dict]) -> ModeState:
-        """
-        Process the latest hand landmarks and update the mode state.
-
-        Args:
-            hand_data: Output from HandDetector.process_frame
-
-        Returns:
-            ModeState describing the active and pending modes.
-        """
+        """Process the latest hand landmarks and update the mode state."""
         now = time.time()
         active_hand = self._select_active_hand(hand_data)
 
@@ -144,7 +136,6 @@ class ModeSwitchDetector:
         self.last_detected_mode = None
 
     def _estimate_palm_size(self, landmarks: List[Dict]) -> float:
-        """Approximate a scale factor for the detected hand."""
         width = self._distance(landmarks[self.INDEX_MCP], landmarks[self.PINKY_MCP])
         if width <= 0.0:
             width = self._distance(landmarks[self.WRIST], landmarks[self.MIDDLE_TIP])
@@ -171,19 +162,7 @@ class ModeSwitchDetector:
         return closest_mode
 
     def _detect_thumbs_up(self, landmarks: List[Dict]) -> Optional[int]:
-        """
-        Detect thumbs up gesture for mode 0.
-        
-        Thumbs up criteria:
-        - Thumb is extended upward (thumb tip is above thumb IP/MCP)
-        - Other fingers (index, middle, ring, pinky) are curled (tips below PIP joints)
-        
-        Args:
-            landmarks: Hand landmarks
-            
-        Returns:
-            0 if thumbs up detected, None otherwise
-        """
+        """Detect thumbs up gesture for mode 0."""
         thumb_tip = landmarks[self.THUMB_TIP]
         thumb_ip = landmarks[self.THUMB_IP]
         thumb_mcp = landmarks[self.THUMB_MCP]

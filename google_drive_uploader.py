@@ -69,25 +69,10 @@ class GoogleDriveUploader:
         self._authenticate()
     
     def _authenticate(self):
-        """
-        Authenticate with Google Drive API using OAuth 2.0 user consent.
-        
-        Flow:
-        1. Load existing token from token.json if it exists
-        2. Refresh token if expired
-        3. If no token exists, launch OAuth consent flow
-        4. Save token to token.json for future use
-        
-        Client credentials can be provided via:
-        - GOOGLE_DRIVE_CLIENT_SECRET_JSON (JSON string) - preferred
-        - client_secret.json file - fallback
-        
-        Token is always persisted to token.json.
-        """
+        """Authenticate with Google Drive API using OAuth 2.0."""
         creds = None
         token_path = DEFAULT_TOKEN_FILE
         
-        # Load existing token from token.json
         if os.path.exists(token_path):
             try:
                 creds = Credentials.from_authorized_user_file(token_path, SCOPES)
@@ -96,12 +81,10 @@ class GoogleDriveUploader:
                 logger.warning(f"Failed to load existing token: {e}")
                 creds = None
         
-        # Refresh token if expired
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
                 logger.info("Refreshed OAuth token")
-                # Save refreshed token
                 with open(token_path, 'w') as token:
                     token.write(creds.to_json())
                 logger.info(f"Saved refreshed token to {token_path}")
@@ -109,14 +92,11 @@ class GoogleDriveUploader:
                 logger.warning(f"Token refresh failed: {e}")
                 creds = None
         
-        # If no valid credentials, start OAuth flow
         if not creds or not creds.valid:
-            # Load client credentials
             client_secret_json = os.getenv('GOOGLE_DRIVE_CLIENT_SECRET_JSON')
             client_secret_path = os.getenv('GOOGLE_DRIVE_CLIENT_SECRET_FILE', DEFAULT_CLIENT_SECRET_FILE)
             
             if client_secret_json:
-                # Use client credentials from environment variable
                 try:
                     client_config = json.loads(client_secret_json)
                     flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
@@ -129,7 +109,6 @@ class GoogleDriveUploader:
                         "Ensure it's a valid JSON string with 'installed' or 'web' key."
                     )
             elif os.path.exists(client_secret_path):
-                # Use client credentials from file
                 flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
                 logger.info(f"Starting OAuth flow using client_secret.json...")
                 creds = flow.run_local_server(port=0)
@@ -141,34 +120,19 @@ class GoogleDriveUploader:
                     "Download client_secret.json from Google Cloud Console (OAuth 2.0 Client ID)."
                 )
             
-            # Save token to token.json for future use
             if creds:
                 with open(token_path, 'w') as token:
                     token.write(creds.to_json())
                 logger.info(f"Saved OAuth token to {token_path} for future use")
         
-        # Final validation
         if not creds or not creds.valid:
             raise ValueError("Failed to obtain valid Google Drive OAuth credentials")
         
-        # Build the Drive service
         self.service = build('drive', 'v3', credentials=creds)
         logger.info("Google Drive service initialized with OAuth user authentication")
     
     def upload_file(self, file_path: str, file_name: Optional[str] = None) -> Optional[str]:
-        """
-        Upload a file to Google Drive using Simple Upload.
-        
-        Reference: https://developers.google.com/workspace/drive/api/guides/manage-uploads#simple
-        
-        Args:
-            file_path: Local path to the file to upload
-            file_name: Optional custom name for the uploaded file.
-                      If None, uses the original filename.
-        
-        Returns:
-            File ID if upload succeeded, None otherwise
-        """
+        """Upload a file to Google Drive."""
         if not self.service:
             logger.error("Google Drive service not initialized")
             return None
@@ -177,31 +141,18 @@ class GoogleDriveUploader:
             logger.error(f"File not found: {file_path}")
             return None
         
-        # Use original filename if not specified
         if file_name is None:
             file_name = os.path.basename(file_path)
         
         try:
-            # Determine MIME type from file extension
             mime_type = self._get_mime_type(file_path)
             
-            # Prepare file metadata
-            # If folder_id is provided, upload to that folder; otherwise upload to My Drive root
-            file_metadata = {
-                'name': file_name
-            }
+            file_metadata = {'name': file_name}
             if self.folder_id:
                 file_metadata['parents'] = [self.folder_id]
             
-            # Create MediaFileUpload object
-            media = MediaFileUpload(
-                file_path,
-                mimetype=mime_type,
-                resumable=False  # Simple upload (non-resumable for files < 5MB)
-            )
+            media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
             
-            # Upload file using Simple Upload
-            # Reference: https://developers.google.com/workspace/drive/api/guides/manage-uploads#simple
             file = self.service.files().create(
                 body=file_metadata,
                 media_body=media,
@@ -221,15 +172,7 @@ class GoogleDriveUploader:
     
     @staticmethod
     def _get_mime_type(file_path: str) -> str:
-        """
-        Infer MIME type from file extension.
-        
-        Args:
-            file_path: Path to the file
-        
-        Returns:
-            MIME type string
-        """
+        """Infer MIME type from file extension."""
         ext = os.path.splitext(file_path)[1].lower()
         mime_types = {
             '.jpg': 'image/jpeg',
@@ -242,45 +185,30 @@ class GoogleDriveUploader:
         return mime_types.get(ext, 'application/octet-stream')
     
     def get_shareable_link(self, file_id: str) -> Optional[str]:
-        """
-        Make a file publicly accessible and get a shareable link.
-        
-        Args:
-            file_id: Google Drive file ID
-        
-        Returns:
-            Shareable link URL if successful, None otherwise
-        """
+        """Make a file publicly accessible and get a shareable link."""
         if not self.service:
             logger.error("Google Drive service not initialized")
             return None
         
         try:
-            # Make file publicly accessible (anyone with the link can view)
-            permission = {
-                'type': 'anyone',
-                'role': 'reader'
-            }
+            permission = {'type': 'anyone', 'role': 'reader'}
             
             self.service.permissions().create(
                 fileId=file_id,
                 body=permission
             ).execute()
             
-            # Get the shareable link
             file = self.service.files().get(
                 fileId=file_id,
                 fields='webViewLink, webContentLink'
             ).execute()
             
-            # Prefer webContentLink (direct download) over webViewLink (preview)
             shareable_link = file.get('webContentLink') or file.get('webViewLink')
             
             if shareable_link:
                 logger.info(f"Created shareable link for file {file_id}")
                 return shareable_link
             else:
-                # Fallback: construct link manually
                 shareable_link = f"https://drive.google.com/uc?export=view&id={file_id}"
                 logger.info(f"Using constructed shareable link for file {file_id}")
                 return shareable_link
@@ -294,15 +222,7 @@ class GoogleDriveUploader:
 
 
 def upload_snapshot_to_drive(snapshot_path: str) -> bool:
-    """
-    Convenience function to upload a snapshot to Google Drive.
-    
-    Args:
-        snapshot_path: Path to the snapshot file to upload
-    
-    Returns:
-        True if upload succeeded, False otherwise
-    """
+    """Upload a snapshot to Google Drive."""
     try:
         uploader = GoogleDriveUploader()
         file_id = uploader.upload_file(snapshot_path)
@@ -313,15 +233,7 @@ def upload_snapshot_to_drive(snapshot_path: str) -> bool:
 
 
 def upload_snapshot_and_get_link(snapshot_path: str) -> Optional[str]:
-    """
-    Upload a snapshot to Google Drive and return a publicly shareable link.
-    
-    Args:
-        snapshot_path: Path to the snapshot file to upload
-    
-    Returns:
-        Publicly accessible shareable link if successful, None otherwise
-    """
+    """Upload a snapshot to Google Drive and return a shareable link."""
     try:
         uploader = GoogleDriveUploader()
         file_id = uploader.upload_file(snapshot_path)
@@ -329,7 +241,6 @@ def upload_snapshot_and_get_link(snapshot_path: str) -> Optional[str]:
         if not file_id:
             return None
         
-        # Get shareable link
         shareable_link = uploader.get_shareable_link(file_id)
         return shareable_link
         
