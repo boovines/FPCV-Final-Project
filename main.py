@@ -16,18 +16,20 @@ from mode_switch_detector import ModeSwitchDetector
 from dotenv import load_dotenv
 
 try:
-    from google_drive_uploader import upload_snapshot_to_drive
+    from google_drive_uploader import upload_snapshot_to_drive, upload_snapshot_and_get_link
     GOOGLE_DRIVE_AVAILABLE = True
 except ImportError:
     GOOGLE_DRIVE_AVAILABLE = False
     upload_snapshot_to_drive = None
+    upload_snapshot_and_get_link = None
 
 try:
-    from imessage_sender import send_snapshot_via_imessage
+    from imessage_sender import send_snapshot_via_imessage, send_text_via_imessage
     IMESSAGE_AVAILABLE = True
 except ImportError:
     IMESSAGE_AVAILABLE = False
     send_snapshot_via_imessage = None
+    send_text_via_imessage = None
 
 
 try:
@@ -422,32 +424,49 @@ class VisionPromptGlasses:
 
     def handle_mode_2(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """
-        Mode 2: iMessage Send
+        Mode 2: Google Drive Upload and iMessage Link
         
-        Sends snapshot as image message via iMessage/SMS using macOS Messages.app and announces completion via TTS.
-        Sends as iMessage if recipient is on Apple, otherwise falls back to SMS/MMS via paired iPhone.
+        Uploads snapshot to Google Drive and sends the shareable link via iMessage/SMS.
+        Announces completion via TTS.
         
         Args:
             cropped_image: Cropped numpy array image (already rotated 90° left)
             snapshot_path: File path where snapshot was saved
             image_base64: Base64-encoded image string for API calls
         """
-        if not IMESSAGE_AVAILABLE or send_snapshot_via_imessage is None:
+        if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_and_get_link is None:
+            print("[Mode 2] Google Drive uploader not available.")
+            print("  Install required packages and configure Google Drive API credentials.")
+            return
+        
+        if not IMESSAGE_AVAILABLE or send_text_via_imessage is None:
             print("[Mode 2] iMessage sender not available.")
             print("  This feature requires macOS and Messages.app to be signed in.")
             print("  Ensure you're running on macOS and have set IMESSAGE_RECIPIENT environment variable.")
             return
         
-        print(f"[Mode 2] Sending snapshot via iMessage/SMS: {snapshot_path}")
+        print(f"[Mode 2] Uploading snapshot to Google Drive: {snapshot_path}")
         
-        # Send snapshot via iMessage/SMS
-        send_success = send_snapshot_via_imessage(snapshot_path)
+        # Upload snapshot to Google Drive and get shareable link
+        shareable_link = upload_snapshot_and_get_link(snapshot_path)
+        
+        if not shareable_link:
+            print("[Mode 2] Failed to upload snapshot to Google Drive. Check logs for details.")
+            self.output_ai_response("Failed to upload to Google Drive.")
+            return
+        
+        print(f"[Mode 2] Upload successful. Shareable link: {shareable_link}")
+        print(f"[Mode 2] Sending link via iMessage/SMS")
+        
+        # Send shareable link via iMessage/SMS
+        send_success = send_text_via_imessage(shareable_link)
         
         if send_success:
             # Announce completion via TTS
-            self.output_ai_response("text sent")
+            self.output_ai_response("Photo sent")
         else:
             print("[Mode 2] iMessage send failed. Check logs for details.")
+            self.output_ai_response("Photo uploaded but failed to send link")
 
     def handle_mode_3(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """
