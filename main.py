@@ -31,6 +31,12 @@ except ImportError:
     send_snapshot_via_imessage = None
     send_text_via_imessage = None
 
+try:
+    from product_search import search_similar_products
+    PRODUCT_SEARCH_AVAILABLE = True
+except ImportError:
+    PRODUCT_SEARCH_AVAILABLE = False
+    search_similar_products = None
 
 try:
     import speech_recognition as sr
@@ -511,25 +517,74 @@ class VisionPromptGlasses:
 
     def handle_mode_4(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """
-        Mode 4: Visual Product Search
+        Mode 4: Visual Product Search with SerpAPI Google Shopping
         
-        Intended behavior (NOT IMPLEMENTED):
-        1. Find visually similar products using Google Cloud Vision Product Search
-        2. Print user-friendly results to terminal
-        
-        Reference: https://docs.cloud.google.com/vision/product-search/docs/create-product-set-search-products
+        Searches for top 3 products that visually resemble the image.
+        Uses OpenAI Vision API for product analysis and ranking.
+        Uses SerpAPI Google Shopping Light API for product discovery.
         
         Args:
-            cropped_image: Cropped numpy array image
+            cropped_image: Cropped numpy array image (already rotated 90° left)
             snapshot_path: File path where snapshot was saved
             image_base64: Base64-encoded image string for API calls
         """
-        # TODO: Implement visual product search
-        # TODO: - Authenticate with Google Cloud Vision API
-        # TODO: - Create/use product set and catalog
-        # TODO: - Perform product search on image
-        # TODO: - Format and print results to terminal (product names, prices, links, etc.)
-        print(f"[Mode 4] Visual product search not yet implemented for: {snapshot_path}")
+        if not PRODUCT_SEARCH_AVAILABLE or search_similar_products is None:
+            print("[Mode 4] Product search not available.")
+            self.output_ai_response("Product search is not available.")
+            return
+        
+        serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        
+        if not serpapi_api_key:
+            print("[Mode 4] SerpAPI credentials not configured.")
+            print("  Set SERPAPI_API_KEY environment variable.")
+            self.output_ai_response("SerpAPI credentials not configured.")
+            return
+        
+        if not openai_api_key:
+            print("[Mode 4] OpenAI API key not found.")
+            self.output_ai_response("OpenAI API key not configured.")
+            return
+        
+        try:
+            image_url = f"data:image/jpeg;base64,{image_base64}"
+            
+            result = search_similar_products(
+                image_url=image_url,
+                serpapi_api_key=serpapi_api_key,
+                openai_api_key=openai_api_key
+            )
+            
+            products = result.get("results", [])
+            
+            if not products:
+                self.output_ai_response("I couldn't find any similar products.")
+                return
+            
+            print("\n" + "=" * 50)
+            print("Top Similar Products")
+            print("=" * 50)
+            
+            for i, product in enumerate(products, 1):
+                print(f"\n{i}. {product.get('product_name', 'Unknown Product')}")
+                print(f"   Brand: {product.get('brand', 'Unknown')}")
+                print(f"   Similarity: {product.get('similarity_score', 0.0):.2%}")
+                print(f"   URL: {product.get('product_url', 'N/A')}")
+            
+            print("\n" + "=" * 50)
+            
+            num_products = len(products)
+            if num_products == 1:
+                top_product = products[0]
+                tts_message = f"Found 1 similar product: {top_product.get('product_name', 'product')} by {top_product.get('brand', 'unknown brand')}."
+            else:
+                tts_message = f"Found {num_products} similar products. Top match: {products[0].get('product_name', 'product')}."
+            
+            self.output_ai_response(tts_message)
+            
+        except Exception:
+            self.output_ai_response("I couldn't search for products.")
 
     def capture_spoken_prompt(self) -> Optional[str]:
         """Record the user's spoken question and transcribe it via ElevenLabs."""
