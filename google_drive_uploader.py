@@ -1,9 +1,11 @@
 """
 Google Drive Uploader Module
 
-Handles uploading snapshots to Google Drive using the Google Drive API.
+Handles uploading snapshots to Google Drive using OAuth user authentication.
 Implements Simple Upload as documented at:
 https://developers.google.com/workspace/drive/api/guides/manage-uploads#simple
+
+Uses OAuth 2.0 with user consent for personal Gmail accounts.
 """
 
 import os
@@ -17,7 +19,6 @@ load_dotenv()
 
 try:
     from google.oauth2.credentials import Credentials
-    from google.oauth2 import service_account
     from google_auth_oauthlib.flow import InstalledAppFlow
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
@@ -31,15 +32,21 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Google Drive API scopes required for file upload
+# Google Drive API scope for file upload
+# https://www.googleapis.com/auth/drive.file - allows creating and accessing files created by this app
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
+
+# Default paths for OAuth credentials and tokens
+DEFAULT_CLIENT_SECRET_FILE = 'client_secret.json'
+DEFAULT_TOKEN_FILE = 'token.json'
 
 
 class GoogleDriveUploader:
     """
-    Handles authentication and file uploads to Google Drive.
+    Handles OAuth user authentication and file uploads to Google Drive.
     
-    Supports both OAuth 2.0 and service account authentication.
+    Uses OAuth 2.0 with user consent for personal Gmail accounts.
+    Uploads files to the authenticated user's My Drive.
     """
     
     def __init__(self, folder_id: Optional[str] = None):
@@ -47,8 +54,9 @@ class GoogleDriveUploader:
         Initialize the Google Drive uploader.
         
         Args:
-            folder_id: Google Drive folder ID where files should be uploaded.
-                      If None, will be read from GOOGLE_DRIVE_FOLDER_ID env var.
+            folder_id: Optional Google Drive folder ID where files should be uploaded.
+                      If None, files will be uploaded to My Drive root.
+                      Can be set via GOOGLE_DRIVE_FOLDER_ID env var.
         """
         if not GOOGLE_DRIVE_AVAILABLE:
             raise ImportError(
@@ -57,151 +65,97 @@ class GoogleDriveUploader:
             )
         
         self.folder_id = folder_id or os.getenv('GOOGLE_DRIVE_FOLDER_ID')
-        if not self.folder_id:
-            raise ValueError(
-                "Google Drive folder ID not configured. "
-                "Set GOOGLE_DRIVE_FOLDER_ID environment variable or pass folder_id parameter."
-            )
-        
         self.service = None
         self._authenticate()
     
     def _authenticate(self):
         """
-        Authenticate with Google Drive API.
+        Authenticate with Google Drive API using OAuth 2.0 user consent.
         
-        Supports:
-        1. Service account (preferred, no token.json needed):
-           - GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_FILE (path to service account JSON)
+        Flow:
+        1. Load existing token from token.json if it exists
+        2. Refresh token if expired
+        3. If no token exists, launch OAuth consent flow
+        4. Save token to token.json for future use
         
-        2. OAuth 2.0 (via environment variables, no token.json needed by default):
-           - GOOGLE_DRIVE_CREDENTIALS_JSON (JSON string) or credentials.json file
-           - GOOGLE_DRIVE_TOKEN_JSON (JSON string) - preferred over token.json file
-           - GOOGLE_DRIVE_USE_TOKEN_FILE=true (optional, to enable token.json file usage)
+        Client credentials can be provided via:
+        - GOOGLE_DRIVE_CLIENT_SECRET_JSON (JSON string) - preferred
+        - client_secret.json file - fallback
         
-        Note: By default, token.json file is NOT used. Set GOOGLE_DRIVE_USE_TOKEN_FILE=true
-        if you want to use token.json file instead of environment variables.
+        Token is always persisted to token.json.
         """
         creds = None
+        token_path = DEFAULT_TOKEN_FILE
         
-        # Try service account authentication first
-        service_account_file = (
-            os.getenv('GOOGLE_APPLICATION_CREDENTIALS') or
-            os.getenv('GOOGLE_SERVICE_ACCOUNT_FILE')
-        )
-        
-        if service_account_file and os.path.exists(service_account_file):
+        # Load existing token from token.json
+        if os.path.exists(token_path):
             try:
-                creds = service_account.Credentials.from_service_account_file(
-                    service_account_file, scopes=SCOPES
-                )
-                logger.info("Authenticated using service account")
+                creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+                logger.info("Loaded OAuth token from token.json")
             except Exception as e:
-                logger.warning(f"Service account authentication failed: {e}")
+                logger.warning(f"Failed to load existing token: {e}")
+                creds = None
         
-        # Fall back to OAuth 2.0 if service account not available
-        if creds is None or not creds.valid:
-            # Try to load token from environment variable first, then file (if enabled)
-            token_json = os.getenv('GOOGLE_DRIVE_TOKEN_JSON')
-            token_path = os.getenv('GOOGLE_DRIVE_TOKEN_FILE', 'token.json')
-            use_token_file = os.getenv('GOOGLE_DRIVE_USE_TOKEN_FILE', 'false').lower() == 'true'
-            
-            # Load existing token if available
-            # Priority: 1) Environment variable, 2) File (only if enabled)
-            if token_json:
-                try:
-                    # Parse JSON string from environment variable
-                    token_data = json.loads(token_json)
-                    creds = Credentials.from_authorized_user_info(token_data, SCOPES)
-                    logger.info("Loaded OAuth token from environment variable")
-                except (json.JSONDecodeError, ValueError, Exception) as e:
-                    logger.warning(f"Failed to load token from environment variable: {e}")
-                    creds = None
-            
-            # Only check file if env var not set and file usage is enabled
-            if not creds and use_token_file and os.path.exists(token_path):
-                try:
-                    creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-                    logger.info("Loaded OAuth token from file")
-                except Exception as e:
-                    logger.warning(f"Failed to load existing token file: {e}")
-                    creds = None
-            
-            # Refresh or get new token
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    try:
-                        creds.refresh(Request())
-                        logger.info("Refreshed OAuth token")
-                        # Only save to file if explicitly enabled
-                        if use_token_file:
-                            with open(token_path, 'w') as token:
-                                token.write(creds.to_json())
-                            logger.info(f"Saved refreshed token to {token_path}")
-                        elif token_json:
-                            logger.info(
-                                "Token refreshed. Update GOOGLE_DRIVE_TOKEN_JSON environment variable "
-                                "with the refreshed token to avoid re-authentication."
-                            )
-                    except Exception as e:
-                        logger.warning(f"Token refresh failed: {e}")
-                        creds = None
-                
-                # If still no valid credentials, start OAuth flow
-                if not creds:
-                    # Try to load credentials from environment variable first, then file
-                    credentials_json = os.getenv('GOOGLE_DRIVE_CREDENTIALS_JSON')
-                    credentials_path = os.getenv('GOOGLE_DRIVE_CREDENTIALS_FILE', 'credentials.json')
-                    
-                    if credentials_json:
-                        try:
-                            # Parse JSON string from environment variable
-                            client_config = json.loads(credentials_json)
-                            flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                            creds = flow.run_local_server(port=0)
-                            logger.info("Completed OAuth flow using credentials from environment variable")
-                        except (json.JSONDecodeError, ValueError, Exception) as e:
-                            raise ValueError(
-                                f"Failed to parse GOOGLE_DRIVE_CREDENTIALS_JSON: {e}. "
-                                "Ensure it's a valid JSON string."
-                            )
-                    elif os.path.exists(credentials_path):
-                        flow = InstalledAppFlow.from_client_secrets_file(
-                            credentials_path, SCOPES
-                        )
-                        creds = flow.run_local_server(port=0)
-                        logger.info("Completed OAuth flow using credentials file")
-                    else:
-                        raise FileNotFoundError(
-                            "OAuth credentials not found. Set GOOGLE_DRIVE_CREDENTIALS_JSON "
-                            f"environment variable or provide {credentials_path} file. "
-                            "Download credentials.json from Google Cloud Console."
-                        )
-                
-                # Save token for future use only if file-based storage is enabled
-                if creds:
-                    if use_token_file:
-                        # Save to file for persistence
-                        with open(token_path, 'w') as token:
-                            token.write(creds.to_json())
-                        logger.info(f"Saved OAuth token to {token_path}")
-                    else:
-                        # When using environment variables, log instructions instead
-                        logger.info(
-                            "OAuth authentication completed. To avoid re-authentication, set "
-                            "GOOGLE_DRIVE_TOKEN_JSON environment variable with the following JSON:\n"
-                            f"{creds.to_json()}\n"
-                            "Alternatively, set GOOGLE_DRIVE_USE_TOKEN_FILE=true to save token to file."
-                        )
+        # Refresh token if expired
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+                logger.info("Refreshed OAuth token")
+                # Save refreshed token
+                with open(token_path, 'w') as token:
+                    token.write(creds.to_json())
+                logger.info(f"Saved refreshed token to {token_path}")
+            except Exception as e:
+                logger.warning(f"Token refresh failed: {e}")
+                creds = None
         
+        # If no valid credentials, start OAuth flow
         if not creds or not creds.valid:
-            raise ValueError("Failed to obtain valid Google Drive credentials")
+            # Load client credentials
+            client_secret_json = os.getenv('GOOGLE_DRIVE_CLIENT_SECRET_JSON')
+            client_secret_path = os.getenv('GOOGLE_DRIVE_CLIENT_SECRET_FILE', DEFAULT_CLIENT_SECRET_FILE)
+            
+            if client_secret_json:
+                # Use client credentials from environment variable
+                try:
+                    client_config = json.loads(client_secret_json)
+                    flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+                    logger.info("Starting OAuth flow using client credentials from environment variable...")
+                    creds = flow.run_local_server(port=0)
+                    logger.info("OAuth consent completed")
+                except (json.JSONDecodeError, ValueError, Exception) as e:
+                    raise ValueError(
+                        f"Failed to parse GOOGLE_DRIVE_CLIENT_SECRET_JSON: {e}. "
+                        "Ensure it's a valid JSON string with 'installed' or 'web' key."
+                    )
+            elif os.path.exists(client_secret_path):
+                # Use client credentials from file
+                flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
+                logger.info(f"Starting OAuth flow using client_secret.json...")
+                creds = flow.run_local_server(port=0)
+                logger.info("OAuth consent completed")
+            else:
+                raise FileNotFoundError(
+                    f"OAuth client credentials not found. "
+                    f"Set GOOGLE_DRIVE_CLIENT_SECRET_JSON environment variable or provide {client_secret_path} file. "
+                    "Download client_secret.json from Google Cloud Console (OAuth 2.0 Client ID)."
+                )
+            
+            # Save token to token.json for future use
+            if creds:
+                with open(token_path, 'w') as token:
+                    token.write(creds.to_json())
+                logger.info(f"Saved OAuth token to {token_path} for future use")
+        
+        # Final validation
+        if not creds or not creds.valid:
+            raise ValueError("Failed to obtain valid Google Drive OAuth credentials")
         
         # Build the Drive service
         self.service = build('drive', 'v3', credentials=creds)
-        logger.info("Google Drive service initialized")
+        logger.info("Google Drive service initialized with OAuth user authentication")
     
-    def upload_file(self, file_path: str, file_name: Optional[str] = None) -> bool:
+    def upload_file(self, file_path: str, file_name: Optional[str] = None) -> Optional[str]:
         """
         Upload a file to Google Drive using Simple Upload.
         
@@ -213,15 +167,15 @@ class GoogleDriveUploader:
                       If None, uses the original filename.
         
         Returns:
-            True if upload succeeded, False otherwise
+            File ID if upload succeeded, None otherwise
         """
         if not self.service:
             logger.error("Google Drive service not initialized")
-            return False
+            return None
         
         if not os.path.exists(file_path):
             logger.error(f"File not found: {file_path}")
-            return False
+            return None
         
         # Use original filename if not specified
         if file_name is None:
@@ -232,10 +186,12 @@ class GoogleDriveUploader:
             mime_type = self._get_mime_type(file_path)
             
             # Prepare file metadata
+            # If folder_id is provided, upload to that folder; otherwise upload to My Drive root
             file_metadata = {
-                'name': file_name,
-                'parents': [self.folder_id] if self.folder_id else []
+                'name': file_name
             }
+            if self.folder_id:
+                file_metadata['parents'] = [self.folder_id]
             
             # Create MediaFileUpload object
             media = MediaFileUpload(
@@ -252,15 +208,16 @@ class GoogleDriveUploader:
                 fields='id, name'
             ).execute()
             
-            logger.info(f"Successfully uploaded {file_name} to Google Drive (ID: {file.get('id')})")
-            return True
+            file_id = file.get('id')
+            logger.info(f"Successfully uploaded {file_name} to Google Drive (ID: {file_id})")
+            return file_id
             
         except HttpError as error:
             logger.error(f"Google Drive API error: {error}")
-            return False
+            return None
         except Exception as e:
             logger.error(f"Unexpected error during upload: {e}")
-            return False
+            return None
     
     @staticmethod
     def _get_mime_type(file_path: str) -> str:
@@ -283,6 +240,57 @@ class GoogleDriveUploader:
             '.webp': 'image/webp',
         }
         return mime_types.get(ext, 'application/octet-stream')
+    
+    def get_shareable_link(self, file_id: str) -> Optional[str]:
+        """
+        Make a file publicly accessible and get a shareable link.
+        
+        Args:
+            file_id: Google Drive file ID
+        
+        Returns:
+            Shareable link URL if successful, None otherwise
+        """
+        if not self.service:
+            logger.error("Google Drive service not initialized")
+            return None
+        
+        try:
+            # Make file publicly accessible (anyone with the link can view)
+            permission = {
+                'type': 'anyone',
+                'role': 'reader'
+            }
+            
+            self.service.permissions().create(
+                fileId=file_id,
+                body=permission
+            ).execute()
+            
+            # Get the shareable link
+            file = self.service.files().get(
+                fileId=file_id,
+                fields='webViewLink, webContentLink'
+            ).execute()
+            
+            # Prefer webContentLink (direct download) over webViewLink (preview)
+            shareable_link = file.get('webContentLink') or file.get('webViewLink')
+            
+            if shareable_link:
+                logger.info(f"Created shareable link for file {file_id}")
+                return shareable_link
+            else:
+                # Fallback: construct link manually
+                shareable_link = f"https://drive.google.com/uc?export=view&id={file_id}"
+                logger.info(f"Using constructed shareable link for file {file_id}")
+                return shareable_link
+                
+        except HttpError as error:
+            logger.error(f"Google Drive API error creating shareable link: {error}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error creating shareable link: {e}")
+            return None
 
 
 def upload_snapshot_to_drive(snapshot_path: str) -> bool:
@@ -297,7 +305,34 @@ def upload_snapshot_to_drive(snapshot_path: str) -> bool:
     """
     try:
         uploader = GoogleDriveUploader()
-        return uploader.upload_file(snapshot_path)
+        file_id = uploader.upload_file(snapshot_path)
+        return file_id is not None
     except Exception as e:
         logger.error(f"Failed to upload snapshot: {e}")
         return False
+
+
+def upload_snapshot_and_get_link(snapshot_path: str) -> Optional[str]:
+    """
+    Upload a snapshot to Google Drive and return a publicly shareable link.
+    
+    Args:
+        snapshot_path: Path to the snapshot file to upload
+    
+    Returns:
+        Publicly accessible shareable link if successful, None otherwise
+    """
+    try:
+        uploader = GoogleDriveUploader()
+        file_id = uploader.upload_file(snapshot_path)
+        
+        if not file_id:
+            return None
+        
+        # Get shareable link
+        shareable_link = uploader.get_shareable_link(file_id)
+        return shareable_link
+        
+    except Exception as e:
+        logger.error(f"Failed to upload snapshot and get shareable link: {e}")
+        return None

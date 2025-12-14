@@ -17,5 +17,10 @@ google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 
-# InfoBip WhatsApp API (for Mode 2)
+# Note: Mode 2 uses iMessage via macOS Messages.app (no additional packages required)
+
+# Google Maps Geocoding API (for Mode 3)
 requests
+
+# Google Cloud Vision API (for Mode 3 - landmark detection)
+google-cloud-vision

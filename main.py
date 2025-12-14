@@ -23,11 +23,12 @@ except ImportError:
     upload_snapshot_to_drive = None
 
 try:
-    from infobip_whatsapp_sender import send_snapshot_via_whatsapp
-    INFOBIP_AVAILABLE = True
+    from imessage_sender import send_snapshot_via_imessage
+    IMESSAGE_AVAILABLE = True
 except ImportError:
-    INFOBIP_AVAILABLE = False
-    send_snapshot_via_whatsapp = None
+    IMESSAGE_AVAILABLE = False
+    send_snapshot_via_imessage = None
+
 
 try:
     import speech_recognition as sr
@@ -421,54 +422,73 @@ class VisionPromptGlasses:
 
     def handle_mode_2(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """
-        Mode 2: WhatsApp Send via InfoBip
+        Mode 2: iMessage Send
         
-        Sends snapshot as WhatsApp image message using InfoBip's HTTPS API and announces completion via TTS.
-        
-        Reference: https://www.infobip.com/docs/api/channels/whatsapp/whatsapp-outbound-messages/whatsapp-text-and-media-messages/send-whatsapp-image-message
+        Sends snapshot as image message via iMessage/SMS using macOS Messages.app and announces completion via TTS.
+        Sends as iMessage if recipient is on Apple, otherwise falls back to SMS/MMS via paired iPhone.
         
         Args:
             cropped_image: Cropped numpy array image (already rotated 90° left)
             snapshot_path: File path where snapshot was saved
             image_base64: Base64-encoded image string for API calls
         """
-        if not INFOBIP_AVAILABLE or send_snapshot_via_whatsapp is None:
-            print("[Mode 2] InfoBip WhatsApp sender not available. Install required packages:")
-            print("  pip install requests")
+        if not IMESSAGE_AVAILABLE or send_snapshot_via_imessage is None:
+            print("[Mode 2] iMessage sender not available.")
+            print("  This feature requires macOS and Messages.app to be signed in.")
+            print("  Ensure you're running on macOS and have set IMESSAGE_RECIPIENT environment variable.")
             return
         
-        print(f"[Mode 2] Sending snapshot via WhatsApp: {snapshot_path}")
+        print(f"[Mode 2] Sending snapshot via iMessage/SMS: {snapshot_path}")
         
-        # Send snapshot via WhatsApp using InfoBip
-        send_success = send_snapshot_via_whatsapp(snapshot_path)
+        # Send snapshot via iMessage/SMS
+        send_success = send_snapshot_via_imessage(snapshot_path)
         
         if send_success:
             # Announce completion via TTS
-            self.output_ai_response("Upload completed.")
+            self.output_ai_response("text sent")
         else:
-            print("[Mode 2] WhatsApp send failed. Check logs for details.")
+            print("[Mode 2] iMessage send failed. Check logs for details.")
 
     def handle_mode_3(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """
         Mode 3: Location Detection
         
-        Intended behavior (NOT IMPLEMENTED):
-        1. Determine the physical location where the photo was taken
-        2. Announce location via TTS
-        
-        Reference: https://developers.google.com/maps/documentation/places/web-service/overview
+        Determines the physical location where the photo was taken by sending the image
+        to OpenAI Vision API with a prompt asking to identify the location.
+        Announces the location via TTS.
         
         Args:
-            cropped_image: Cropped numpy array image
+            cropped_image: Cropped numpy array image (already rotated 90° left)
             snapshot_path: File path where snapshot was saved
             image_base64: Base64-encoded image string for API calls
         """
-        # TODO: Implement location detection
-        # TODO: - Extract EXIF GPS data if available
-        # TODO: - Use Google Places API or similar to identify location
-        # TODO: - Convert coordinates to human-readable address/place name
-        # TODO: - Announce location via TTS (e.g., "Photo taken at Central Park, New York")
-        print(f"[Mode 3] Location detection not yet implemented for: {snapshot_path}")
+        print(f"[Mode 3] Detecting location from snapshot: {snapshot_path}")
+        
+        # Use OpenAI to identify location from image
+        # NOTE: The image is sent ONLY to OpenAI Vision API, not to Google Maps API
+        location_prompt = "Look at the contextual image. Guess where this is. Give a short answer, limited to 5 words, that just includes the region, city, country, etc."
+        
+        try:
+            location = self.openai_client.analyze_image(
+                image_base64=image_base64,
+                prompt=location_prompt
+            )
+            
+            if location:
+                # Clean up the response (remove any extra whitespace/newlines)
+                location = location.strip()
+                # Announce location via TTS
+                # Format as a natural sentence
+                location_message = f"The location is probably near {location}."
+                self.output_ai_response(location_message)
+                print(f"[Mode 3] Detected location: {location}")
+            else:
+                # Announce graceful failure via TTS
+                self.output_ai_response("Unable to determine location.")
+                print("[Mode 3] Unable to determine location.")
+        except Exception as e:
+            print(f"[Mode 3] Error detecting location with OpenAI: {e}")
+            self.output_ai_response("Unable to determine location.")
 
     def handle_mode_4(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """
@@ -814,10 +834,10 @@ class VisionPromptGlasses:
                 # --- end TTS via ElevenLabs streaming ---
             except Exception as tts_error:
                 print(f"[TTS stream error] {tts_error}")
-                print(f"\nAI Response:\n{ai_response}\n")
+                print(f"\nResponse:\n{ai_response}\n")
                 return
 
-        print(f"\nAI Response:\n{ai_response}\n")
+        print(f"\nResponse:\n{ai_response}\n")
 
     
 
