@@ -1,17 +1,12 @@
 """
 Vision-Prompt Glasses Prototype
-
-Main application orchestrating:
-- Hand gesture detection for frame selection
-- Mode switching via hand gestures
-- Image capture and processing
-- Multi-mode operations (AI analysis, uploads, product search, etc.)
 """
 
 import cv2
 import numpy as np
 import os
 import time
+import threading
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
@@ -46,6 +41,9 @@ class VisionPromptGlasses:
         # Camera and application state
         self.cap = None
         self.is_running = False
+        self.is_processing = False
+        self.processing_frame = None
+        self.processing_lock = threading.Lock()
         
         # Snapshot management
         self.snapshots_dir = "snapshots"
@@ -140,12 +138,33 @@ class VisionPromptGlasses:
         except Exception as e:
             print(f"Analysis error: {e}")
     
+    def _process_in_background(self, cropped_image: np.ndarray, snapshot_path: str, 
+                               image_base64: str, mode: int):
+        """Process the snapshot in a background thread."""
+        try:
+            self.mode_handlers.handle_snapshot(
+                cropped_image=cropped_image,
+                snapshot_path=snapshot_path,
+                image_base64=image_base64,
+                mode=mode
+            )
+        except Exception as e:
+            print(f"Processing error: {e}")
+        finally:
+            with self.processing_lock:
+                self.is_processing = False
+    
     def capture_and_analyze(self, frame: np.ndarray, corners: list, mode: int = 0):
         """Capture the framed region and route to appropriate mode handler."""
         current_time = time.time()
         
-        if current_time - self.last_capture_time < self.capture_cooldown:
-            return
+        # Check if already processing
+        with self.processing_lock:
+            if self.is_processing:
+                return
+            
+            if current_time - self.last_capture_time < self.capture_cooldown:
+                return
         
         try:
             cropped_image = self.crop_utils.crop_frame_region(frame, corners)
@@ -173,17 +192,24 @@ class VisionPromptGlasses:
                 print("Couldn't process image")
                 return
             
-            self.mode_handlers.handle_snapshot(
-                cropped_image=cropped_image,
-                snapshot_path=snapshot_path,
-                image_base64=image_base64,
-                mode=mode
-            )
+            # Store the current frame for window refresh and start background processing
+            with self.processing_lock:
+                self.processing_frame = frame.copy()
+                self.is_processing = True
+                self.last_capture_time = current_time
             
-            self.last_capture_time = current_time
+            # Start processing in background thread
+            processing_thread = threading.Thread(
+                target=self._process_in_background,
+                args=(cropped_image, snapshot_path, image_base64, mode),
+                daemon=True
+            )
+            processing_thread.start()
             
         except Exception as e:
             print(f"Capture error: {e}")
+            with self.processing_lock:
+                self.is_processing = False
     
     def run(self):
         """Main application loop."""
@@ -209,58 +235,95 @@ class VisionPromptGlasses:
         
         print("\nStarting camera feed...")
         
+        # Create window with fixed size (prevents auto-minimizing on macOS)
+        cv2.namedWindow('Vision-Prompt Glasses', cv2.WINDOW_AUTOSIZE)
+        
         self.is_running = True
         
         try:
+            frame_count = 0
             while self.is_running:
+                # Always read frames to keep camera active
                 ret, frame = self.cap.read()
                 if not ret:
                     print("Camera disconnected")
                     break
                 
-                annotated_frame, hand_data = self.hand_detector.process_frame(frame)
-                finger_tips = self.hand_detector.get_finger_tips(hand_data)
+                frame_count += 1
                 
-                gesture_detected, corners, progress = self.frame_detector.detect_frame_gesture(
-                    hand_data, finger_tips
-                )
+                # Check if processing
+                with self.processing_lock:
+                    currently_processing = self.is_processing
+                    frozen_frame = self.processing_frame.copy() if self.processing_frame is not None else None
                 
-                mode_state = self.mode_detector.update(hand_data)
+                if not currently_processing:
+                    # Normal operation - process hand detection
+                    annotated_frame, hand_data = self.hand_detector.process_frame(frame)
+                    finger_tips = self.hand_detector.get_finger_tips(hand_data)
+                    
+                    gesture_detected, corners, progress = self.frame_detector.detect_frame_gesture(
+                        hand_data, finger_tips
+                    )
+                    
+                    mode_state = self.mode_detector.update(hand_data)
+                    
+                    overlay_frame = self.crop_utils.draw_frame_overlay(annotated_frame, corners, progress)
+                    overlay_frame = self.crop_utils.draw_mode_switch_progress(
+                        overlay_frame, mode_state.progress, mode_state.pending_mode
+                    )
+                    
+                    cv2.putText(overlay_frame, "Form rectangle with both hands (thumb+index)", 
+                               (10, overlay_frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    cv2.putText(overlay_frame, "Hold steady for 2 seconds", 
+                               (10, overlay_frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                    
+                    mode_text = f"Mode: {mode_state.current_mode}"
+                    text_size = cv2.getTextSize(mode_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
+                    text_x = overlay_frame.shape[1] - text_size[0] - 20
+                    text_y = overlay_frame.shape[0] - 20
+                    cv2.putText(overlay_frame, mode_text, (text_x, text_y), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+                    
+                    if gesture_detected and corners:
+                        self.capture_and_analyze(frame, corners, mode_state.current_mode)
+                        self.frame_detector.reset()
+                else:
+                    # During processing, show the frozen frame with a processing indicator
+                    if frozen_frame is not None:
+                        overlay_frame = frozen_frame.copy()
+                    else:
+                        overlay_frame = frame.copy()
+                    
+                    # Add a semi-transparent overlay
+                    overlay = overlay_frame.copy()
+                    cv2.rectangle(overlay, (0, 0), (overlay_frame.shape[1], overlay_frame.shape[0]), 
+                                 (0, 0, 0), -1)
+                    cv2.addWeighted(overlay, 0.3, overlay_frame, 0.7, 0, overlay_frame)
+                    
+                    # Add "Processing..." text
+                    text = "Processing..."
+                    text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 3)[0]
+                    text_x = (overlay_frame.shape[1] - text_size[0]) // 2
+                    text_y = (overlay_frame.shape[0] + text_size[1]) // 2
+                    cv2.putText(overlay_frame, text, (text_x, text_y), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
                 
-                overlay_frame = self.crop_utils.draw_frame_overlay(annotated_frame, corners, progress)
-                overlay_frame = self.crop_utils.draw_mode_switch_progress(
-                    overlay_frame, mode_state.progress, mode_state.pending_mode
-                )
-                
-                cv2.putText(overlay_frame, "Form rectangle with both hands (thumb+index)", 
-                           (10, overlay_frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                cv2.putText(overlay_frame, "Hold steady for 2 seconds", 
-                           (10, overlay_frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-                
-                mode_text = f"Mode: {mode_state.current_mode}"
-                text_size = cv2.getTextSize(mode_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                text_x = overlay_frame.shape[1] - text_size[0] - 20
-                text_y = overlay_frame.shape[0] - 20
-                cv2.putText(overlay_frame, mode_text, (text_x, text_y), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-                
-                if gesture_detected and corners:
-                    self.capture_and_analyze(frame, corners, mode_state.current_mode)
-                    self.frame_detector.reset()
-                
+                # Show frame - using WINDOW_AUTOSIZE prevents resizing issues
                 cv2.imshow('Vision-Prompt Glasses', overlay_frame)
                 
+                # Get keyboard input
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
+                    self.is_running = False
                     break
-                elif key == ord('r'):
+                elif key == ord('r') and not currently_processing:
                     self.frame_detector.reset()
                     print("Gesture detection reset")
-                elif key == ord('s'):
+                elif key == ord('s') and not currently_processing:
                     snapshot_path = self.select_cached_snapshot()
                     if snapshot_path:
                         self.process_cached_snapshot(snapshot_path)
-                elif key == ord('t'):
+                elif key == ord('t') and not currently_processing:
                     if self.openai_client.test_connection():
                         print("OpenAI connected!")
                     else:
@@ -268,7 +331,8 @@ class VisionPromptGlasses:
         
         except KeyboardInterrupt:
             print("\nInterrupted by user")
-        
+        except Exception as e:
+            print(f"\nUnexpected error in main loop: {e}")
         finally:
             self.cleanup()
     

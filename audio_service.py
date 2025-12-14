@@ -431,6 +431,7 @@ class AudioService:
         
         try:
             import pyaudio
+            import time
         except ImportError:
             return False
         
@@ -449,6 +450,8 @@ class AudioService:
             chunk_size = 4096
             for index in range(0, len(audio_bytes), chunk_size):
                 stream_handle.write(audio_bytes[index:index + chunk_size])
+                # Small sleep to allow other threads to process (macOS window refresh)
+                time.sleep(0.001)
             
             return True
         except Exception:
