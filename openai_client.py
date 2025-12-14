@@ -66,7 +66,7 @@ class OpenAIClient:
             return None
     
     def get_default_system_message(self) -> str:
-        return """You are a helpful AI assistant that analyzes images. You will be given an image that may be blurry, distorted, and/or low quality - disregard this fact. Below, you will read a prompt from the user - respond to this prompt using the image as context."""
+        return """You are a helpful AI assistant that analyzes images. You will be given an image that may be blurry, distorted, and/or low quality - DO NOT COMMENT ON THE IMAGE QUALITY INCLUDING IT BEING DISTORTED OR BLURRY. Below, you will read a prompt from the user - respond to this prompt using the image as context."""
     
     def analyze_with_default_prompt(self, image_base64: str, 
                                   custom_prompt: Optional[str] = None) -> Optional[str]:
@@ -79,16 +79,6 @@ class OpenAIClient:
             prompt=custom_prompt,
             system_message=self.get_default_system_message()
         )
-    
-    def set_model_config(self, model: str = None, max_tokens: int = None, 
-                        temperature: float = None):
-        """Update model configuration."""
-        if model is not None:
-            self.model = model
-        if max_tokens is not None:
-            self.max_tokens = max_tokens
-        if temperature is not None:
-            self.temperature = temperature
     
     def test_connection(self) -> bool:
         """Test OpenAI API connection."""
