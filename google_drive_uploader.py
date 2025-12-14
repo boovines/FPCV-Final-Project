@@ -10,7 +10,6 @@ Uses OAuth 2.0 with user consent for personal Gmail accounts.
 
 import os
 import json
-import logging
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -27,10 +26,6 @@ try:
     GOOGLE_DRIVE_AVAILABLE = True
 except ImportError:
     GOOGLE_DRIVE_AVAILABLE = False
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Google Drive API scope for file upload
 # https://www.googleapis.com/auth/drive.file - allows creating and accessing files created by this app
@@ -76,20 +71,15 @@ class GoogleDriveUploader:
         if os.path.exists(token_path):
             try:
                 creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-                logger.info("Loaded OAuth token from token.json")
-            except Exception as e:
-                logger.warning(f"Failed to load existing token: {e}")
+            except Exception:
                 creds = None
         
         if creds and creds.expired and creds.refresh_token:
             try:
                 creds.refresh(Request())
-                logger.info("Refreshed OAuth token")
                 with open(token_path, 'w') as token:
                     token.write(creds.to_json())
-                logger.info(f"Saved refreshed token to {token_path}")
-            except Exception as e:
-                logger.warning(f"Token refresh failed: {e}")
+            except Exception:
                 creds = None
         
         if not creds or not creds.valid:
@@ -100,45 +90,32 @@ class GoogleDriveUploader:
                 try:
                     client_config = json.loads(client_secret_json)
                     flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-                    logger.info("Starting OAuth flow using client credentials from environment variable...")
                     creds = flow.run_local_server(port=0)
-                    logger.info("OAuth consent completed")
                 except (json.JSONDecodeError, ValueError, Exception) as e:
-                    raise ValueError(
-                        f"Failed to parse GOOGLE_DRIVE_CLIENT_SECRET_JSON: {e}. "
-                        "Ensure it's a valid JSON string with 'installed' or 'web' key."
-                    )
+                    raise ValueError(f"Couldn't parse Google Drive credentials: {e}")
             elif os.path.exists(client_secret_path):
                 flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
-                logger.info(f"Starting OAuth flow using client_secret.json...")
                 creds = flow.run_local_server(port=0)
-                logger.info("OAuth consent completed")
             else:
-                raise FileNotFoundError(
-                    f"OAuth client credentials not found. "
-                    f"Set GOOGLE_DRIVE_CLIENT_SECRET_JSON environment variable or provide {client_secret_path} file. "
-                    "Download client_secret.json from Google Cloud Console (OAuth 2.0 Client ID)."
-                )
+                raise FileNotFoundError("Google Drive credentials not found - set up client_secret.json")
             
             if creds:
                 with open(token_path, 'w') as token:
                     token.write(creds.to_json())
-                logger.info(f"Saved OAuth token to {token_path} for future use")
         
         if not creds or not creds.valid:
-            raise ValueError("Failed to obtain valid Google Drive OAuth credentials")
+            raise ValueError("Couldn't authenticate with Google Drive")
         
         self.service = build('drive', 'v3', credentials=creds)
-        logger.info("Google Drive service initialized with OAuth user authentication")
     
     def upload_file(self, file_path: str, file_name: Optional[str] = None) -> Optional[str]:
         """Upload a file to Google Drive."""
         if not self.service:
-            logger.error("Google Drive service not initialized")
+            print("Google Drive isn't set up yet")
             return None
         
         if not os.path.exists(file_path):
-            logger.error(f"File not found: {file_path}")
+            print(f"Can't find file: {file_path}")
             return None
         
         if file_name is None:
@@ -160,14 +137,13 @@ class GoogleDriveUploader:
             ).execute()
             
             file_id = file.get('id')
-            logger.info(f"Successfully uploaded {file_name} to Google Drive (ID: {file_id})")
             return file_id
             
         except HttpError as error:
-            logger.error(f"Google Drive API error: {error}")
+            print(f"Google Drive upload failed: {error}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error during upload: {e}")
+            print(f"Upload error: {e}")
             return None
     
     @staticmethod
@@ -187,7 +163,7 @@ class GoogleDriveUploader:
     def get_shareable_link(self, file_id: str) -> Optional[str]:
         """Make a file publicly accessible and get a shareable link."""
         if not self.service:
-            logger.error("Google Drive service not initialized")
+            print("Google Drive isn't set up yet")
             return None
         
         try:
@@ -206,18 +182,16 @@ class GoogleDriveUploader:
             shareable_link = file.get('webContentLink') or file.get('webViewLink')
             
             if shareable_link:
-                logger.info(f"Created shareable link for file {file_id}")
                 return shareable_link
             else:
                 shareable_link = f"https://drive.google.com/uc?export=view&id={file_id}"
-                logger.info(f"Using constructed shareable link for file {file_id}")
                 return shareable_link
                 
         except HttpError as error:
-            logger.error(f"Google Drive API error creating shareable link: {error}")
+            print(f"Couldn't create shareable link: {error}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error creating shareable link: {e}")
+            print(f"Link creation error: {e}")
             return None
 
 
@@ -228,7 +202,7 @@ def upload_snapshot_to_drive(snapshot_path: str) -> bool:
         file_id = uploader.upload_file(snapshot_path)
         return file_id is not None
     except Exception as e:
-        logger.error(f"Failed to upload snapshot: {e}")
+        print(f"Upload failed: {e}")
         return False
 
 
@@ -245,5 +219,5 @@ def upload_snapshot_and_get_link(snapshot_path: str) -> Optional[str]:
         return shareable_link
         
     except Exception as e:
-        logger.error(f"Failed to upload snapshot and get shareable link: {e}")
+        print(f"Upload failed: {e}")
         return None

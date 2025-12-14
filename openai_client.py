@@ -55,14 +55,13 @@ class OpenAIClient:
             if response.choices and len(response.choices) > 0:
                 return response.choices[0].message.content
             else:
-                print("No response received from OpenAI API")
                 return None
                 
         except openai.APIError as e:
-            print(f"OpenAI API error: {e}")
+            print(f"OpenAI error: {e}")
             return None
         except Exception as e:
-            print(f"Unexpected error calling OpenAI API: {e}")
+            print(f"AI analysis error: {e}")
             return None
     
     def get_default_system_message(self) -> str:
@@ -90,5 +89,5 @@ class OpenAIClient:
             )
             return response.choices[0].message.content is not None
         except Exception as e:
-            print(f"OpenAI connection test failed: {e}")
+            print(f"Connection test failed: {e}")
             return False

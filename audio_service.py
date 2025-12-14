@@ -64,9 +64,7 @@ class AudioService:
             or os.getenv("ELEVEN_VOICE_ID")
         )
         if not self.eleven_tts_voice_id:
-            print(
-                "Warning: ElevenLabs voice ID not configured. Set ELEVENLABS_TTS_VOICE_ID to enable TTS playback."
-            )
+            print("Set ELEVENLABS_TTS_VOICE_ID to enable voice responses")
         
         # TTS configuration
         self.eleven_tts_model_id = os.getenv("ELEVENLABS_TTS_MODEL_ID", "eleven_turbo_v2")
@@ -87,9 +85,7 @@ class AudioService:
         self.tts_ready = False
         
         if ElevenLabs is None or stream is None:
-            print(
-                "Warning: ElevenLabs SDK streaming utilities not available; AI responses will be text-only."
-            )
+            print("ElevenLabs SDK not available - responses will be text only")
         else:
             self._initialize_elevenlabs_client()
         
@@ -98,10 +94,7 @@ class AudioService:
             try:
                 import pyaudio  # noqa: F401
             except Exception:
-                print(
-                    "Note: ELEVENLABS_TTS_OUTPUT_FORMAT is set to a PCM format but PyAudio is not available. "
-                    "Either install PyAudio or set ELEVENLABS_TTS_OUTPUT_FORMAT=mp3_44100_128 to use SDK streaming playback."
-                )
+                print("Install PyAudio for better audio playback")
     
     def _initialize_elevenlabs_client(self):
         """Initialize ElevenLabs SDK client and auto-select voice if needed."""
@@ -149,13 +142,13 @@ class AudioService:
                     if selected_voice:
                         self.eleven_tts_voice_id = selected_voice
                         self.tts_ready = True
-                        print(f"Note: No ELEVENLABS_TTS_VOICE_ID set; using default voice: {selected_voice}")
+                        print(f"Using default voice: {selected_voice}")
                     else:
-                        print("Warning: No voices available in ElevenLabs account. Create a voice and set ELEVENLABS_TTS_VOICE_ID.")
-                except Exception as voice_err:
-                    print(f"Warning: Could not auto-select a voice ({voice_err}). Set ELEVENLABS_TTS_VOICE_ID.")
-        except Exception as sdk_error:
-            print(f"Warning: ElevenLabs SDK initialization failed ({sdk_error}). Falling back to REST API calls.")
+                        print("No voices available - set ELEVENLABS_TTS_VOICE_ID")
+                except Exception:
+                    print("Couldn't auto-select voice - set ELEVENLABS_TTS_VOICE_ID")
+        except Exception:
+            print("Using ElevenLabs REST API")
     
     def capture_spoken_prompt(self) -> Optional[str]:
         """Record the user's spoken question and transcribe it via ElevenLabs."""
@@ -171,7 +164,7 @@ class AudioService:
                         phrase_time_limit=self.max_listen_duration,
                     )
                 except sr.WaitTimeoutError:
-                    print("No speech detected within the listening window.")
+                    print("No speech detected")
                     return None
             
             print("Processing speech...")
@@ -182,17 +175,17 @@ class AudioService:
                 print(f"You said: {transcript}")
                 return transcript
             
-            print("Transcription failed or returned empty text.")
+            print("Couldn't understand that")
             return None
         
         except sr.UnknownValueError:
-            print("Speech was unintelligible. Please try again.")
+            print("Couldn't understand that - try again")
             return None
         except sr.RequestError as e:
-            print(f"Speech recognition error: {e}")
+            print(f"Audio error: {e}")
             return None
         except Exception as e:
-            print(f"Unexpected error capturing audio: {e}")
+            print(f"Audio error: {e}")
             return None
     
     def transcribe_audio_with_elevenlabs(self, audio_bytes: bytes) -> Optional[str]:
@@ -214,8 +207,8 @@ class AudioService:
                 transcript = self._extract_transcript_from_result(result)
                 if transcript:
                     return transcript
-            except Exception as sdk_error:
-                print(f"ElevenLabs SDK transcription error: {sdk_error}. Falling back to REST API.")
+            except Exception:
+                pass  # Will try REST API next
         
         # Fall back to REST API
         try:
@@ -240,11 +233,10 @@ class AudioService:
             if transcript:
                 return transcript
             
-            print("ElevenLabs STT response did not include a transcript.")
             return None
         
         except requests.RequestException as rest_error:
-            print(f"ElevenLabs REST transcription error: {rest_error}")
+            print(f"Transcription error: {rest_error}")
             return None
     
     def output_ai_response(self, ai_response: Optional[str]):
@@ -312,7 +304,7 @@ class AudioService:
                 if not playback_success:
                     stream(chunk for chunk in audio_chunks)
             except Exception as tts_error:
-                print(f"[TTS stream error] {tts_error}")
+                print(f"Voice output error: {tts_error}")
                 print(f"\nResponse:\n{ai_response}\n")
                 return
         
@@ -440,7 +432,6 @@ class AudioService:
         try:
             import pyaudio
         except ImportError:
-            print("PyAudio not available for TTS playback; skipping audio output.")
             return False
         
         pyaudio_instance = None
@@ -460,8 +451,7 @@ class AudioService:
                 stream_handle.write(audio_bytes[index:index + chunk_size])
             
             return True
-        except Exception as playback_error:
-            print(f"Local TTS playback failed: {playback_error}")
+        except Exception:
             return False
         finally:
             if stream_handle is not None:

@@ -6,17 +6,11 @@ Sends as iMessage if recipient is on Apple, otherwise falls back to SMS/MMS via 
 """
 
 import os
-import logging
 import subprocess
-from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 def send_text_via_imessage(text: str) -> bool:
@@ -24,10 +18,7 @@ def send_text_via_imessage(text: str) -> bool:
     recipient_phone = os.getenv('IMESSAGE_RECIPIENT')
     
     if not recipient_phone:
-        logger.error(
-            "IMESSAGE_RECIPIENT environment variable not set. "
-            "Set IMESSAGE_RECIPIENT to the recipient's phone number (e.g., +1234567890)"
-        )
+        print("Set IMESSAGE_RECIPIENT in your environment to send messages")
         return False
     
     escaped_text = text.replace('"', '\\"')
@@ -94,8 +85,6 @@ def send_text_via_imessage(text: str) -> bool:
         end tell
         '''
         
-        logger.info(f"Sending text message via iMessage/SMS to {recipient_phone}")
-        
         # Execute AppleScript
         result = subprocess.run(
             ["osascript", "-e", script],
@@ -105,36 +94,26 @@ def send_text_via_imessage(text: str) -> bool:
         )
         
         if result.returncode == 0:
-            logger.info("Text message sent successfully via iMessage/SMS")
             return True
         else:
             error_msg = result.stderr.strip() if result.stderr else "Unknown error"
-            logger.error(f"Failed to send iMessage: {error_msg}")
             
             # Provide helpful error messages for common issues
             if "not allowed assistive access" in error_msg.lower() or "not authorized" in error_msg.lower():
-                logger.error(
-                    "macOS automation permission required. "
-                    "Go to System Settings > Privacy & Security > Automation "
-                    "and allow Terminal/Python to control Messages.app"
-                )
+                print("Grant automation permission in System Settings > Privacy & Security > Automation")
             elif "not signed in" in error_msg.lower():
-                logger.error(
-                    "Messages.app is not signed in. "
-                    "Please sign in to Messages.app with your Apple ID."
-                )
+                print("Sign in to Messages.app with your Apple ID")
+            else:
+                print(f"Message send failed: {error_msg}")
             
             return False
             
     except subprocess.TimeoutExpired:
-        logger.error("iMessage send timed out after 30 seconds")
+        print("Message send timed out")
         return False
     except FileNotFoundError:
-        logger.error(
-            "osascript not found. This script requires macOS. "
-            "iMessage sending is only available on macOS systems."
-        )
+        print("This feature requires macOS")
         return False
     except Exception as e:
-        logger.error(f"Unexpected error sending iMessage: {e}")
+        print(f"Message send error: {e}")
         return False

@@ -29,7 +29,7 @@ class CropUtils:
             
             return cropped
         except cv2.error as e:
-            print(f"Perspective transformation failed: {e}")
+            print(f"Crop failed: {e}")
             return None
     
     def encode_image_to_base64(self, image: np.ndarray, format: str = 'JPEG') -> Optional[str]:
@@ -48,7 +48,7 @@ class CropUtils:
             
             return img_base64
         except Exception as e:
-            print(f"Image encoding failed: {e}")
+            print(f"Encoding error: {e}")
             return None
     
     def save_cropped_image(self, cropped_image: np.ndarray, filename: str) -> bool:
@@ -57,7 +57,7 @@ class CropUtils:
             success = cv2.imwrite(filename, cropped_image)
             return success
         except Exception as e:
-            print(f"Failed to save image {filename}: {e}")
+            print(f"Couldn't save image: {e}")
             return False
     
     def draw_frame_overlay(self, frame: np.ndarray, corners: List[Tuple[float, float]], 

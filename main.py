@@ -59,17 +59,16 @@ class VisionPromptGlasses:
         try:
             self.cap = cv2.VideoCapture(0)
             if not self.cap.isOpened():
-                print("Error: Could not open webcam")
+                print("Couldn't open webcam")
                 return False
             
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
             self.cap.set(cv2.CAP_PROP_FPS, 30)
             
-            print("Camera initialized successfully")
             return True
         except Exception as e:
-            print(f"Error initializing camera: {e}")
+            print(f"Camera error: {e}")
             return False
     
     def get_cached_snapshots(self) -> list:
@@ -81,7 +80,7 @@ class VisionPromptGlasses:
                     snapshot_files.append(os.path.join(self.snapshots_dir, filename))
             return sorted(snapshot_files, key=os.path.getmtime, reverse=True)
         except Exception as e:
-            print(f"Error reading snapshots directory: {e}")
+            print(f"Couldn't read snapshots: {e}")
             return []
     
     def select_cached_snapshot(self) -> Optional[str]:
@@ -122,7 +121,7 @@ class VisionPromptGlasses:
             
             image_base64 = self.crop_utils.encode_image_to_base64(image)
             if not image_base64:
-                print("Failed to encode image")
+                print("Couldn't process image")
                 return
             
             prompt = input(f"\nEnter your question about the image '{os.path.basename(snapshot_path)}': ")
@@ -136,10 +135,10 @@ class VisionPromptGlasses:
             if response:
                 self.audio_service.output_ai_response(response)
             else:
-                print("Failed to get response from AI.")
+                print("Couldn't analyze the image")
                 
         except Exception as e:
-            print(f"Error processing cached snapshot: {e}")
+            print(f"Analysis error: {e}")
     
     def capture_and_analyze(self, frame: np.ndarray, corners: list, mode: int = 0):
         """Capture the framed region and route to appropriate mode handler."""
@@ -151,7 +150,7 @@ class VisionPromptGlasses:
         try:
             cropped_image = self.crop_utils.crop_frame_region(frame, corners)
             if cropped_image is None:
-                print("Failed to crop image")
+                print("Couldn't crop image")
                 return
             
             if not self.crop_utils.validate_crop_quality(cropped_image):
@@ -164,14 +163,14 @@ class VisionPromptGlasses:
             snapshot_path = os.path.join(self.snapshots_dir, f"snapshot_{timestamp}.jpg")
             
             if not self.crop_utils.save_cropped_image(cropped_image, snapshot_path):
-                print("Failed to save snapshot")
+                print("Couldn't save snapshot")
                 return
             
             print(f"\nSnapshot saved: {snapshot_path}")
             
             image_base64 = self.crop_utils.encode_image_to_base64(cropped_image)
             if not image_base64:
-                print("Failed to encode image")
+                print("Couldn't process image")
                 return
             
             self.mode_handlers.handle_snapshot(
@@ -184,7 +183,7 @@ class VisionPromptGlasses:
             self.last_capture_time = current_time
             
         except Exception as e:
-            print(f"Error in capture and analyze: {e}")
+            print(f"Capture error: {e}")
     
     def run(self):
         """Main application loop."""
@@ -204,9 +203,9 @@ class VisionPromptGlasses:
         # Test OpenAI connection
         print("Testing OpenAI connection...")
         if not self.openai_client.test_connection():
-            print("Warning: OpenAI connection test failed. Check your API key.")
+            print("OpenAI connection failed - check your API key")
         else:
-            print("OpenAI connection successful!")
+            print("OpenAI connected!")
         
         print("\nStarting camera feed...")
         
@@ -216,7 +215,7 @@ class VisionPromptGlasses:
             while self.is_running:
                 ret, frame = self.cap.read()
                 if not ret:
-                    print("Failed to read frame from camera")
+                    print("Camera disconnected")
                     break
                 
                 annotated_frame, hand_data = self.hand_detector.process_frame(frame)
@@ -263,9 +262,9 @@ class VisionPromptGlasses:
                         self.process_cached_snapshot(snapshot_path)
                 elif key == ord('t'):
                     if self.openai_client.test_connection():
-                        print("OpenAI connection test: SUCCESS")
+                        print("OpenAI connected!")
                     else:
-                        print("OpenAI connection test: FAILED")
+                        print("OpenAI connection failed")
         
         except KeyboardInterrupt:
             print("\nInterrupted by user")
@@ -292,7 +291,7 @@ def main():
         app = VisionPromptGlasses()
         app.run()
     except Exception as e:
-        print(f"Error running application: {e}")
+        print(f"Application error: {e}")
 
 
 if __name__ == "__main__":

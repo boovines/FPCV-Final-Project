@@ -55,7 +55,6 @@ class ModeHandlers:
         """Mode 0: AI Processing with STT/TTS"""
         prompt = self.audio_service.capture_spoken_prompt()
         if not prompt:
-            print("No spoken prompt captured.")
             return
         
         print("Analyzing image...")
@@ -64,62 +63,57 @@ class ModeHandlers:
         if response:
             self.audio_service.output_ai_response(response)
         else:
-            print("Failed to get response from AI.")
+            print("Couldn't analyze the image")
     
     def handle_mode_1(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """Mode 1: Google Drive Upload"""
         if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_to_drive is None:
-            print("[Mode 1] Google Drive upload not available. Install required packages:")
-            print("  pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib")
+            print("Install Google Drive packages to use this mode")
             return
         
-        print(f"[Mode 1] Uploading snapshot to Google Drive: {snapshot_path}")
+        print("Uploading to Google Drive...")
         
         upload_success = upload_snapshot_to_drive(snapshot_path)
         
         if upload_success:
             self.audio_service.output_ai_response("Upload completed.")
         else:
-            print("[Mode 1] Upload failed. Check logs for details.")
+            print("Upload failed")
     
     def handle_mode_2(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """Mode 2: Google Drive Upload and iMessage Link"""
         if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_and_get_link is None:
-            print("[Mode 2] Google Drive uploader not available.")
-            print("  Install required packages and configure Google Drive API credentials.")
+            print("Install Google Drive packages to use this mode")
             return
         
         if not IMESSAGE_AVAILABLE or send_text_via_imessage is None:
-            print("[Mode 2] iMessage sender not available.")
-            print("  This feature requires macOS and Messages.app to be signed in.")
-            print("  Ensure you're running on macOS and have set IMESSAGE_RECIPIENT environment variable.")
+            print("This mode requires macOS and Messages.app")
             return
         
-        print(f"[Mode 2] Uploading snapshot to Google Drive: {snapshot_path}")
+        print("Uploading to Google Drive...")
         
         shareable_link = upload_snapshot_and_get_link(snapshot_path)
         
         if not shareable_link:
-            print("[Mode 2] Failed to upload snapshot to Google Drive. Check logs for details.")
-            self.audio_service.output_ai_response("Failed to upload to Google Drive.")
+            print("Upload failed")
+            self.audio_service.output_ai_response("Upload failed")
             return
         
-        print(f"[Mode 2] Upload successful. Shareable link: {shareable_link}")
-        print(f"[Mode 2] Sending link via iMessage/SMS")
+        print("Sending via iMessage...")
         
         send_success = send_text_via_imessage(shareable_link)
         
         if send_success:
             self.audio_service.output_ai_response("Photo sent")
         else:
-            print("[Mode 2] iMessage send failed. Check logs for details.")
-            self.audio_service.output_ai_response("Photo uploaded but failed to send link")
+            print("Message send failed")
+            self.audio_service.output_ai_response("Photo uploaded but couldn't send")
     
     def handle_mode_3(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """Mode 3: Location Detection"""
-        print(f"[Mode 3] Detecting location from snapshot: {snapshot_path}")
+        print("Detecting location...")
         
-        location_prompt = "Look at the contextual image. Guess where this is. Give a short answer, limited to 5 words, that just includes the region, city, country, etc."
+        location_prompt = "Look at the contextual image. Guess where this is. Give a short answer, limited to 5 words, that just includes the region, city, country, etc. If you know where it is, just say \"The location is probably...\", and if you don't know, say \"I'm sorry, I'm not sure where this is.\""
         
         try:
             location = self.openai_client.analyze_image(
@@ -129,35 +123,31 @@ class ModeHandlers:
             
             if location:
                 location = location.strip()
-                location_message = f"The location is probably near {location}."
-                self.audio_service.output_ai_response(location_message)
-                print(f"[Mode 3] Detected location: {location}")
+                self.audio_service.output_ai_response(location)
             else:
-                self.audio_service.output_ai_response("Unable to determine location.")
-                print("[Mode 3] Unable to determine location.")
+                self.audio_service.output_ai_response("Can't determine location")
         except Exception as e:
-            print(f"[Mode 3] Error detecting location with OpenAI: {e}")
-            self.audio_service.output_ai_response("Unable to determine location.")
+            print(f"Location detection error: {e}")
+            self.audio_service.output_ai_response("Can't determine location")
     
     def handle_mode_4(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
         """Mode 4: Visual Product Search with SerpAPI Google Shopping"""
         if not PRODUCT_SEARCH_AVAILABLE or search_similar_products is None:
-            print("[Mode 4] Product search not available.")
-            self.audio_service.output_ai_response("Product search is not available.")
+            print("Product search not available")
+            self.audio_service.output_ai_response("Product search isn't available")
             return
         
         serpapi_api_key = os.getenv("SERPAPI_API_KEY")
         openai_api_key = os.getenv("OPENAI_API_KEY")
         
         if not serpapi_api_key:
-            print("[Mode 4] SerpAPI credentials not configured.")
-            print("  Set SERPAPI_API_KEY environment variable.")
-            self.audio_service.output_ai_response("SerpAPI credentials not configured.")
+            print("Set SERPAPI_API_KEY to use product search")
+            self.audio_service.output_ai_response("Need SerpAPI key")
             return
         
         if not openai_api_key:
-            print("[Mode 4] OpenAI API key not found.")
-            self.audio_service.output_ai_response("OpenAI API key not configured.")
+            print("Set OPENAI_API_KEY to use product search")
+            self.audio_service.output_ai_response("Need OpenAI key")
             return
         
         try:
@@ -172,20 +162,14 @@ class ModeHandlers:
             products = result.get("results", [])
             
             if not products:
-                self.audio_service.output_ai_response("I couldn't find any similar products.")
+                self.audio_service.output_ai_response("Couldn't find similar products")
                 return
             
-            print("\n" + "=" * 50)
-            print("Top Similar Products")
-            print("=" * 50)
+            print("\nTop Similar Products:")
             
             for i, product in enumerate(products, 1):
-                print(f"\n{i}. {product.get('product_name', 'Unknown Product')}")
-                print(f"   Brand: {product.get('brand', 'Unknown')}")
-                print(f"   Similarity: {product.get('similarity_score', 0.0):.2%}")
-                print(f"   URL: {product.get('product_url', 'N/A')}")
-            
-            print("\n" + "=" * 50)
+                print(f"{i}. {product.get('product_name', 'Unknown')} by {product.get('brand', 'Unknown')}")
+                print(f"   Similarity: {product.get('similarity_score', 0.0):.0%} - {product.get('product_url', 'N/A')}")
             
             num_products = len(products)
             if num_products == 1:
@@ -197,7 +181,7 @@ class ModeHandlers:
             self.audio_service.output_ai_response(tts_message)
             
         except Exception:
-            self.audio_service.output_ai_response("I couldn't search for products.")
+            self.audio_service.output_ai_response("Product search failed")
     
     def handle_snapshot(self, cropped_image: np.ndarray, snapshot_path: str, 
                        image_base64: str, mode: int):
@@ -221,5 +205,5 @@ class ModeHandlers:
         elif mode == 4:
             self.handle_mode_4(cropped_image, snapshot_path, image_base64)
         else:
-            print(f"Unknown mode: {mode}. Defaulting to mode 0.")
+            print(f"Unknown mode {mode} - using mode 0")
             self.handle_mode_0(cropped_image, snapshot_path, image_base64)
