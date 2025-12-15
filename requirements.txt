@@ -24,3 +24,6 @@ requests
 
 # Google Cloud Vision API (for Mode 3 - landmark detection)
 google-cloud-vision
+
+# Detects Stats
+psutil
