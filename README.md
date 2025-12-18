@@ -12,5 +12,5 @@ SERPAPI_API_KEY
 
 IMESSAGE_RECIPIENT
 
-### To run, use
+### To run:
 python main.py
