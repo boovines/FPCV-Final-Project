@@ -1,7 +1,3 @@
-"""
-Vision-Prompt Glasses Prototype
-"""
-
 import cv2
 import numpy as np
 import os
@@ -21,31 +17,22 @@ from mode_handlers import ModeHandlers
 
 
 class VisionPromptGlasses:
-    """Main application class for Vision-Prompt Glasses prototype."""
-    
     def __init__(self):
-        """Initialize the Vision-Prompt Glasses prototype."""
         load_dotenv()
         
-        # Initialize core components
         self.hand_detector = HandDetector()
         self.frame_detector = FrameDetector()
         self.mode_detector = ModeSwitchDetector(hold_duration=1.0)
         self.crop_utils = CropUtils()
         self.openai_client = OpenAIClient()
-        
-        # Initialize audio and mode handling services
         self.audio_service = AudioService()
         self.mode_handlers = ModeHandlers(self.openai_client, self.audio_service)
         
-        # Camera and application state
         self.cap = None
         self.is_running = False
         self.is_processing = False
         self.processing_frame = None
         self.processing_lock = threading.Lock()
-        
-        # Snapshot management
         self.snapshots_dir = "snapshots"
         os.makedirs(self.snapshots_dir, exist_ok=True)
         
@@ -53,7 +40,6 @@ class VisionPromptGlasses:
         self.capture_cooldown = 3.0
     
     def initialize_camera(self) -> bool:
-        """Initialize webcam capture."""
         try:
             self.cap = cv2.VideoCapture(0)
             if not self.cap.isOpened():
@@ -70,7 +56,6 @@ class VisionPromptGlasses:
             return False
     
     def get_cached_snapshots(self) -> list:
-        """Get list of cached snapshot files."""
         try:
             snapshot_files = []
             for filename in os.listdir(self.snapshots_dir):
@@ -82,7 +67,6 @@ class VisionPromptGlasses:
             return []
     
     def select_cached_snapshot(self) -> Optional[str]:
-        """Allow user to select a cached snapshot for analysis."""
         snapshots = self.get_cached_snapshots()
         
         if not snapshots:
@@ -90,7 +74,7 @@ class VisionPromptGlasses:
             return None
         
         print("\nAvailable cached snapshots:")
-        for i, snapshot in enumerate(snapshots[:10]):  # Show last 10
+        for i, snapshot in enumerate(snapshots[:10]):
             filename = os.path.basename(snapshot)
             print(f"{i + 1}. {filename}")
         
@@ -110,7 +94,6 @@ class VisionPromptGlasses:
             return None
     
     def process_cached_snapshot(self, snapshot_path: str):
-        """Process a cached snapshot with OpenAI."""
         try:
             image = cv2.imread(snapshot_path)
             if image is None:
@@ -140,7 +123,6 @@ class VisionPromptGlasses:
     
     def _process_in_background(self, cropped_image: np.ndarray, snapshot_path: str, 
                                image_base64: str, mode: int):
-        """Process the snapshot in a background thread."""
         try:
             self.mode_handlers.handle_snapshot(
                 cropped_image=cropped_image,
@@ -155,10 +137,8 @@ class VisionPromptGlasses:
                 self.is_processing = False
     
     def capture_and_analyze(self, frame: np.ndarray, corners: list, mode: int = 0):
-        """Capture the framed region and route to appropriate mode handler."""
         current_time = time.time()
         
-        # Check if already processing
         with self.processing_lock:
             if self.is_processing:
                 return
@@ -192,13 +172,11 @@ class VisionPromptGlasses:
                 print("Couldn't process image")
                 return
             
-            # Store the current frame for window refresh and start background processing
             with self.processing_lock:
                 self.processing_frame = frame.copy()
                 self.is_processing = True
                 self.last_capture_time = current_time
             
-            # Start processing in background thread
             processing_thread = threading.Thread(
                 target=self._process_in_background,
                 args=(cropped_image, snapshot_path, image_base64, mode),
@@ -212,7 +190,6 @@ class VisionPromptGlasses:
                 self.is_processing = False
     
     def run(self):
-        """Main application loop."""
         print("Vision-Prompt Glasses Prototype")
         print("==============================")
         print("Instructions:")
@@ -222,11 +199,9 @@ class VisionPromptGlasses:
         print("- Press 't' to test OpenAI connection")
         print()
         
-        # Initialize camera
         if not self.initialize_camera():
             return
         
-        # Test OpenAI connection
         print("Testing OpenAI connection...")
         if not self.openai_client.test_connection():
             print("OpenAI connection failed - check your API key")
@@ -235,7 +210,6 @@ class VisionPromptGlasses:
         
         print("\nStarting camera feed...")
         
-        # Create window with fixed size (prevents auto-minimizing on macOS)
         cv2.namedWindow('Vision-Prompt Glasses', cv2.WINDOW_AUTOSIZE)
         
         self.is_running = True
@@ -243,7 +217,6 @@ class VisionPromptGlasses:
         try:
             frame_count = 0
             while self.is_running:
-                # Always read frames to keep camera active
                 ret, frame = self.cap.read()
                 if not ret:
                     print("Camera disconnected")
@@ -251,13 +224,11 @@ class VisionPromptGlasses:
                 
                 frame_count += 1
                 
-                # Check if processing
                 with self.processing_lock:
                     currently_processing = self.is_processing
                     frozen_frame = self.processing_frame.copy() if self.processing_frame is not None else None
                 
                 if not currently_processing:
-                    # Normal operation - process hand detection
                     annotated_frame, hand_data = self.hand_detector.process_frame(frame)
                     finger_tips = self.hand_detector.get_finger_tips(hand_data)
                     
@@ -288,19 +259,16 @@ class VisionPromptGlasses:
                         self.capture_and_analyze(frame, corners, mode_state.current_mode)
                         self.frame_detector.reset()
                 else:
-                    # During processing, show the frozen frame with a processing indicator
                     if frozen_frame is not None:
                         overlay_frame = frozen_frame.copy()
                     else:
                         overlay_frame = frame.copy()
                     
-                    # Add a semi-transparent overlay
                     overlay = overlay_frame.copy()
                     cv2.rectangle(overlay, (0, 0), (overlay_frame.shape[1], overlay_frame.shape[0]), 
                                  (0, 0, 0), -1)
                     cv2.addWeighted(overlay, 0.3, overlay_frame, 0.7, 0, overlay_frame)
                     
-                    # Add "Processing..." text
                     text = "Processing..."
                     text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 3)[0]
                     text_x = (overlay_frame.shape[1] - text_size[0]) // 2
@@ -308,10 +276,8 @@ class VisionPromptGlasses:
                     cv2.putText(overlay_frame, text, (text_x, text_y), 
                                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 3)
                 
-                # Show frame - using WINDOW_AUTOSIZE prevents resizing issues
                 cv2.imshow('Vision-Prompt Glasses', overlay_frame)
                 
-                # Get keyboard input
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     self.is_running = False
@@ -337,7 +303,6 @@ class VisionPromptGlasses:
             self.cleanup()
     
     def cleanup(self):
-        """Clean up resources."""
         self.is_running = False
         
         if self.cap:
@@ -345,12 +310,9 @@ class VisionPromptGlasses:
         
         cv2.destroyAllWindows()
         self.hand_detector.cleanup()
-        
-        print("Cleanup completed")
 
 
 def main():
-    """Main entry point."""
     try:
         app = VisionPromptGlasses()
         app.run()

@@ -1,20 +1,4 @@
 #!/usr/bin/env python3
-"""
-System Evaluation Script for Vision-Prompt Glasses
-Collects simplified performance metrics for Mode 0 (basic image capture and description)
-
-Usage:
-    python system_eval.py [--duration SECONDS] [--min-captures N] [--output FILE]
-
-Reports:
-1. Throughput + bottleneck: FPS, MediaPipe time, percentage of per-frame time
-2. Gesture reliability: stabilization time (mean, std), false reset rate
-3. Crop correctness + speed: total crop compute time, success rate
-4. End-to-end response latency: total time, API+inference time, image encoding time
-5. Resource footprint: CPU mean, memory mean
-
-Results are saved to a JSON file with summary statistics.
-"""
 
 import json
 import time
@@ -26,7 +10,6 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import numpy as np
 
-# Import the main system components
 from mediapipe_utils import HandDetector
 from frame_detector import FrameDetector
 from crop_utils import CropUtils
@@ -54,21 +37,16 @@ from dotenv import load_dotenv
 
 
 class SystemEvaluator:
-    """Evaluates system performance metrics for Mode 0 operations."""
-    
     def __init__(self, output_file: str = "system_eval_results.json"):
-        """Initialize the evaluator with metrics storage."""
         self.output_file = output_file
         load_dotenv()
         
-        # Initialize components
         self.hand_detector = HandDetector()
         self.frame_detector = FrameDetector()
         self.mode_detector = ModeSwitchDetector(hold_duration=1.0)
         self.crop_utils = CropUtils()
         self.openai_client = OpenAIClient()
         
-        # Metrics storage (simplified)
         self.metrics = {
             "evaluation_timestamp": datetime.now().isoformat(),
             "frame_processing": {
@@ -97,18 +75,14 @@ class SystemEvaluator:
             }
         }
         
-        # State tracking for evaluation
         self.frame_count = 0
         self.last_frame_time = None
         self.last_capture_time = 0
         self.capture_cooldown = 3.0
         self.capture_times = []
-        
-        # Gesture tracking
         self.false_reset_count = 0
         self.gesture_attempts = 0
         
-        # Speech/LLM tracking
         self.eleven_api_key = os.getenv("ELEVENLABS_API_KEY") or os.getenv("ELEVEN_API_KEY")
         self.eleven_tts_voice_id = (
             os.getenv("ELEVENLABS_TTS_VOICE_ID") or 
@@ -133,34 +107,27 @@ class SystemEvaluator:
         else:
             self.eleven_client = None
         
-        # Process tracking for resource utilization
         self.process = psutil.Process(os.getpid())
         
     def evaluate_frame_processing(self, frame: np.ndarray) -> Tuple[np.ndarray, dict]:
-        """Process a frame and measure timing for MediaPipe and total."""
         frame_start = time.perf_counter()
         
-        # MediaPipe processing
         mp_start = time.perf_counter()
         annotated_frame, hand_data = self.hand_detector.process_frame(frame)
-        mp_time = (time.perf_counter() - mp_start) * 1000  # Convert to ms
+        mp_time = (time.perf_counter() - mp_start) * 1000
         
-        # Gesture logic
         finger_tips = self.hand_detector.get_finger_tips(hand_data)
         gesture_detected, corners, progress = self.frame_detector.detect_frame_gesture(
             hand_data, finger_tips
         )
         
-        # Overlay rendering
         overlay_frame = self.crop_utils.draw_frame_overlay(annotated_frame, corners, progress)
         
-        total_frame_time = (time.perf_counter() - frame_start) * 1000  # Convert to ms
+        total_frame_time = (time.perf_counter() - frame_start) * 1000
         
-        # Store metrics
         self.metrics["frame_processing"]["per_frame_times"].append(total_frame_time)
         self.metrics["frame_processing"]["mediapipe_times"].append(mp_time)
         
-        # Calculate FPS
         current_time = time.time()
         if self.last_frame_time is not None:
             frame_interval = current_time - self.last_frame_time
@@ -178,31 +145,26 @@ class SystemEvaluator:
         }
     
     def evaluate_gesture_latency(self, corners: Optional[List], gesture_detected: bool):
-        """Track gesture stabilization time and false resets."""
         if corners is None:
             if self.frame_detector.gesture_start_time is not None:
-                # Gesture was reset
                 self.false_reset_count += 1
             return
         
         self.gesture_attempts += 1
         
-        # Track stabilization time
         if self.frame_detector.gesture_start_time is not None:
             if gesture_detected:
                 stabilization_time = time.time() - self.frame_detector.gesture_start_time
                 self.metrics["gesture_reliability"]["stabilization_times"].append(stabilization_time)
     
     def evaluate_crop_performance(self, frame: np.ndarray, corners: List) -> Optional[np.ndarray]:
-        """Measure total crop computation time (transform + validation)."""
         if corners is None or len(corners) != 4:
             return None
         
-        # Total crop computation timing (transform + validation)
         crop_start = time.perf_counter()
         cropped = self.crop_utils.crop_frame_region(frame, corners)
         is_valid = self.crop_utils.validate_crop_quality(cropped) if cropped is not None else False
-        total_crop_time = (time.perf_counter() - crop_start) * 1000  # Convert to ms
+        total_crop_time = (time.perf_counter() - crop_start) * 1000
         
         self.metrics["crop_performance"]["total_crop_times"].append(total_crop_time)
         
@@ -214,7 +176,6 @@ class SystemEvaluator:
         return cropped
     
     def evaluate_speech_pipeline(self) -> Optional[str]:
-        """Capture speech input (not timed for simplified metrics)."""
         if not sr or not self.eleven_api_key:
             return None
         
@@ -238,7 +199,6 @@ class SystemEvaluator:
             return None
     
     def _transcribe_audio(self, audio_bytes: bytes) -> Optional[str]:
-        """Transcribe audio using ElevenLabs STT."""
         if not self.eleven_client:
             return None
         
@@ -251,7 +211,6 @@ class SystemEvaluator:
                 language_code=os.getenv("ELEVENLABS_STT_LANGUAGE", "en"),
             )
             
-            # Extract transcript
             if hasattr(result, 'text'):
                 return result.text
             elif isinstance(result, dict):
@@ -261,31 +220,27 @@ class SystemEvaluator:
             return None
     
     def evaluate_llm_response(self, cropped_image: np.ndarray, prompt: str) -> Optional[str]:
-        """Measure end-to-end latency: encoding, API+inference, and total."""
         end_to_end_start = time.perf_counter()
         
-        # Image encoding timing
         encode_start = time.perf_counter()
         image_base64 = self.crop_utils.encode_image_to_base64(cropped_image)
-        encode_time = (time.perf_counter() - encode_start) * 1000  # Convert to ms
+        encode_time = (time.perf_counter() - encode_start) * 1000
         self.metrics["end_to_end_latency"]["image_encoding_times"].append(encode_time)
         
         if not image_base64:
             return None
         
-        # API submission + inference timing
         api_start = time.perf_counter()
         response = self.openai_client.analyze_with_default_prompt(image_base64, prompt)
-        api_inference_time = (time.perf_counter() - api_start) * 1000  # Convert to ms
+        api_inference_time = (time.perf_counter() - api_start) * 1000
         self.metrics["end_to_end_latency"]["api_inference_times"].append(api_inference_time)
         
-        end_to_end_time = (time.perf_counter() - end_to_end_start) * 1000  # Convert to ms
+        end_to_end_time = (time.perf_counter() - end_to_end_start) * 1000
         self.metrics["end_to_end_latency"]["total_times"].append(end_to_end_time)
         
         return response
     
     def evaluate_tts(self, text: str):
-        """Generate TTS (not timed for simplified metrics)."""
         if not self.eleven_client or not self.eleven_tts_voice_id:
             return
         
@@ -311,11 +266,10 @@ class SystemEvaluator:
     
     
     def sample_resource_utilization(self):
-        """Sample CPU and memory usage."""
         try:
             cpu_percent = self.process.cpu_percent(interval=0.1)
             memory_info = self.process.memory_info()
-            memory_mb = memory_info.rss / (1024 * 1024)  # Convert to MB
+            memory_mb = memory_info.rss / (1024 * 1024)
             
             self.metrics["resource_footprint"]["cpu_samples"].append(cpu_percent)
             self.metrics["resource_footprint"]["memory_samples"].append(memory_mb)
@@ -323,20 +277,12 @@ class SystemEvaluator:
             print(f"Resource sampling error: {e}")
     
     def run_evaluation(self, duration_seconds: int = 300, min_captures: int = 5):
-        """
-        Run the evaluation for a specified duration or until minimum captures are reached.
-        
-        Args:
-            duration_seconds: Maximum evaluation duration
-            min_captures: Minimum number of successful captures to collect
-        """
         print("Starting System Evaluation")
         print("=" * 50)
         print(f"Duration: {duration_seconds} seconds or {min_captures} captures")
         print("Press 'q' to quit early, 'c' to force capture")
         print()
         
-        # Initialize camera
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             print("Error: Could not open webcam")
@@ -355,68 +301,53 @@ class SystemEvaluator:
                 if elapsed > duration_seconds and captures_collected >= min_captures:
                     break
                 
-                # Sample resource utilization periodically
-                if self.frame_count % 30 == 0:  # Every 30 frames
+                if self.frame_count % 30 == 0:
                     self.sample_resource_utilization()
                 
-                # Read frame
                 ret, frame = cap.read()
                 if not ret:
                     break
                 
-                # Process frame with timing
                 overlay_frame, frame_data = self.evaluate_frame_processing(frame)
                 
-                # Evaluate gesture latency
                 self.evaluate_gesture_latency(
                     frame_data["corners"],
                     frame_data["gesture_detected"]
                 )
                 
-                # Update gesture attempts count
                 self.metrics["gesture_reliability"]["total_gesture_attempts"] = self.gesture_attempts
                 self.metrics["gesture_reliability"]["false_reset_count"] = self.false_reset_count
                 
-                # Check for capture trigger
                 if frame_data["gesture_detected"] and frame_data["corners"]:
                     current_time = time.time()
                     if current_time - self.last_capture_time >= self.capture_cooldown:
-                        # Perform full capture and analysis pipeline
                         print(f"\n[Capture #{captures_collected + 1}] Processing...")
                         
-                        # Crop evaluation
                         cropped = self.evaluate_crop_performance(frame, frame_data["corners"])
                         
                         if cropped is not None and self.crop_utils.validate_crop_quality(cropped):
-                            # Speech pipeline evaluation
                             prompt = self.evaluate_speech_pipeline()
                             if not prompt:
                                 prompt = "What do you see in this image?"
                             
-                            # LLM evaluation
                             response = self.evaluate_llm_response(cropped, prompt)
                             
-                            # TTS evaluation (if response available)
                             if response:
                                 self.evaluate_tts(response)
                             
                             captures_collected += 1
                             print(f"  Capture completed. Total: {captures_collected}")
                             
-                            # Reset frame detector
                             self.frame_detector.reset()
                         else:
                             print("  Crop validation failed")
                 
-                # Display frame
                 cv2.imshow('System Evaluation', overlay_frame)
                 
-                # Handle keyboard input
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord('q'):
                     break
                 elif key == ord('c'):
-                    # Force capture for testing
                     if frame_data["corners"]:
                         cropped = self.evaluate_crop_performance(frame, frame_data["corners"])
                         if cropped:
@@ -436,10 +367,8 @@ class SystemEvaluator:
             self.hand_detector.cleanup()
     
     def compute_statistics(self) -> Dict:
-        """Compute simplified summary statistics."""
         stats = {}
         
-        # 1. Throughput + bottleneck
         fps_samples = self.metrics["frame_processing"]["fps_samples"]
         per_frame_times = self.metrics["frame_processing"]["per_frame_times"]
         mp_times = self.metrics["frame_processing"]["mediapipe_times"]
@@ -455,7 +384,6 @@ class SystemEvaluator:
             "mediapipe_percentage_of_frame_time": round(mp_percentage, 1)
         }
         
-        # 2. Gesture reliability
         stab_times = self.metrics["gesture_reliability"]["stabilization_times"]
         false_resets = self.metrics["gesture_reliability"]["false_reset_count"]
         total_attempts = self.metrics["gesture_reliability"]["total_gesture_attempts"]
@@ -472,7 +400,6 @@ class SystemEvaluator:
             "false_reset_rate_percent": round(false_reset_rate, 1)
         }
         
-        # 3. Crop correctness + speed
         crop_times = self.metrics["crop_performance"]["total_crop_times"]
         successful = self.metrics["crop_performance"]["successful_crops"]
         rejected = self.metrics["crop_performance"]["rejected_crops"]
@@ -486,7 +413,6 @@ class SystemEvaluator:
             "success_rate_percent": round(success_rate, 1)
         }
         
-        # 4. End-to-end response latency
         total_times = self.metrics["end_to_end_latency"]["total_times"]
         api_times = self.metrics["end_to_end_latency"]["api_inference_times"]
         encode_times = self.metrics["end_to_end_latency"]["image_encoding_times"]
@@ -501,7 +427,6 @@ class SystemEvaluator:
             "image_encoding_time_ms": round(avg_encode, 2)
         }
         
-        # 5. Resource footprint
         cpu_samples = self.metrics["resource_footprint"]["cpu_samples"]
         memory_samples = self.metrics["resource_footprint"]["memory_samples"]
         
@@ -516,11 +441,9 @@ class SystemEvaluator:
         return stats
     
     def save_results(self):
-        """Compute statistics and save results to JSON file."""
         print("\nComputing statistics...")
         stats = self.compute_statistics()
         
-        # Combine metadata and statistics
         results = {
             "evaluation_metadata": {
                 "timestamp": self.metrics["evaluation_timestamp"],
@@ -530,7 +453,6 @@ class SystemEvaluator:
             "summary_statistics": stats
         }
         
-        # Save to JSON
         with open(self.output_file, 'w') as f:
             json.dump(results, f, indent=2)
         
@@ -538,7 +460,6 @@ class SystemEvaluator:
         print(f"Total frames processed: {self.frame_count}")
         print(f"Total captures: {len(self.metrics['end_to_end_latency']['total_times'])}")
         
-        # Print summary
         print("\n" + "=" * 50)
         print("SUMMARY STATISTICS")
         print("=" * 50)
@@ -556,7 +477,6 @@ class SystemEvaluator:
 
 
 def main():
-    """Main entry point for evaluation script."""
     import argparse
     
     parser = argparse.ArgumentParser(description="System Evaluation for Vision-Prompt Glasses")

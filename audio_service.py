@@ -1,12 +1,3 @@
-"""
-Audio Service Module
-
-Handles all audio-related functionality including:
-- Speech-to-Text (STT) using ElevenLabs
-- Text-to-Speech (TTS) using ElevenLabs
-- Audio recording and playback
-"""
-
 import base64
 import io
 import os
@@ -27,18 +18,13 @@ except ImportError:
 
 
 class AudioService:
-    """Manages all audio input/output operations."""
-    
     def __init__(self):
-        """Initialize audio service with ElevenLabs and speech recognition."""
-        # Validate speech recognition availability
         if sr is None:
             raise ImportError(
                 "speech_recognition package is required for voice input. "
                 "Install it with 'pip install SpeechRecognition' and ensure PyAudio dependencies are available."
             )
         
-        # Initialize speech recognizer
         self.recognizer = sr.Recognizer()
         self.recognizer.pause_threshold = 1.0
         self.recognizer.non_speaking_duration = 0.4
@@ -47,7 +33,6 @@ class AudioService:
         self.listen_timeout = float(os.getenv("ELEVENLABS_LISTEN_TIMEOUT", 12))
         self.max_listen_duration = float(os.getenv("ELEVENLABS_MAX_LISTEN_SECONDS", 25))
         
-        # Get ElevenLabs API key
         self.eleven_api_key = (
             os.getenv("ELEVENLABS_API_KEY")
             or os.getenv("ELEVEN_API_KEY")
@@ -57,7 +42,6 @@ class AudioService:
                 "ElevenLabs API key not found. Set ELEVENLABS_API_KEY or ELEVEN_API_KEY in your environment."
             )
         
-        # Get TTS voice ID
         self.eleven_tts_voice_id = (
             os.getenv("ELEVENLABS_TTS_VOICE_ID")
             or os.getenv("ELEVENLABS_VOICE_ID")
@@ -66,13 +50,11 @@ class AudioService:
         if not self.eleven_tts_voice_id:
             print("Set ELEVENLABS_TTS_VOICE_ID to enable voice responses")
         
-        # TTS configuration
         self.eleven_tts_model_id = os.getenv("ELEVENLABS_TTS_MODEL_ID", "eleven_turbo_v2")
         self.eleven_tts_output_format = os.getenv("ELEVENLABS_TTS_OUTPUT_FORMAT", "pcm_16000")
         self.eleven_tts_sample_rate = self._infer_sample_rate(self.eleven_tts_output_format)
         self.use_local_tts_playback = self.eleven_tts_output_format.startswith("pcm_")
         
-        # STT configuration
         self.eleven_stt_model_id = os.getenv("ELEVENLABS_STT_MODEL_ID", "scribe_v1")
         self.eleven_stt_language = os.getenv("ELEVENLABS_STT_LANGUAGE", "en")
         self.eleven_stt_endpoint = os.getenv(
@@ -80,7 +62,6 @@ class AudioService:
             "https://api.elevenlabs.io/v1/speech-to-text",
         )
         
-        # Initialize ElevenLabs client
         self.eleven_client = None
         self.tts_ready = False
         
@@ -89,7 +70,6 @@ class AudioService:
         else:
             self._initialize_elevenlabs_client()
         
-        # Check PyAudio for local playback
         if self.use_local_tts_playback:
             try:
                 import pyaudio  # noqa: F401
@@ -97,13 +77,11 @@ class AudioService:
                 print("Install PyAudio for better audio playback")
     
     def _initialize_elevenlabs_client(self):
-        """Initialize ElevenLabs SDK client and auto-select voice if needed."""
         try:
             self.eleven_client = ElevenLabs(api_key=self.eleven_api_key)
             self.tts_ready = bool(self.eleven_tts_voice_id)
             
             if not self.tts_ready:
-                # Try to auto-select a voice
                 try:
                     selected_voice = None
                     voices = getattr(self.eleven_client, "voices", None)
@@ -151,7 +129,6 @@ class AudioService:
             print("Using ElevenLabs REST API")
     
     def capture_spoken_prompt(self) -> Optional[str]:
-        """Record the user's spoken question and transcribe it via ElevenLabs."""
         try:
             with sr.Microphone(sample_rate=self.audio_sample_rate) as source:
                 print("\nListening... (speak your question)")
@@ -189,11 +166,9 @@ class AudioService:
             return None
     
     def transcribe_audio_with_elevenlabs(self, audio_bytes: bytes) -> Optional[str]:
-        """Send recorded audio to ElevenLabs Speech-to-Text."""
         if not audio_bytes:
             return None
         
-        # Try SDK method first
         if self.eleven_client is not None:
             audio_buffer = io.BytesIO(audio_bytes)
             audio_buffer.name = "question.wav"
@@ -208,9 +183,8 @@ class AudioService:
                 if transcript:
                     return transcript
             except Exception:
-                pass  # Will try REST API next
+                pass
         
-        # Fall back to REST API
         try:
             response = requests.post(
                 self.eleven_stt_endpoint,
@@ -240,7 +214,6 @@ class AudioService:
             return None
     
     def output_ai_response(self, ai_response: Optional[str]):
-        """Stream the AI response via ElevenLabs TTS."""
         if not ai_response:
             return
         
@@ -312,7 +285,6 @@ class AudioService:
     
     @staticmethod
     def _extract_transcript_from_result(result: Optional[object]) -> Optional[str]:
-        """Extract transcript text from various result formats."""
         if result is None:
             return None
         
@@ -340,7 +312,6 @@ class AudioService:
     
     @staticmethod
     def _infer_sample_rate(output_format: Optional[str]) -> int:
-        """Infer sample rate from output format string."""
         default_rate = 16000
         
         if not output_format or "pcm" not in output_format:
@@ -369,7 +340,6 @@ class AudioService:
     
     @staticmethod
     def _materialize_audio_chunks(audio_candidate: Optional[object]) -> tuple:
-        """Convert audio candidate to tuple of chunks."""
         if audio_candidate is None:
             return tuple()
         
@@ -387,7 +357,6 @@ class AudioService:
     
     @staticmethod
     def _extract_audio_payload(chunk: Optional[object]) -> Optional[object]:
-        """Extract audio data from chunk."""
         if chunk is None:
             return None
         
@@ -401,7 +370,6 @@ class AudioService:
     
     @staticmethod
     def _collect_audio_bytes(audio_chunks: tuple) -> bytes:
-        """Collect audio bytes from chunks."""
         if not audio_chunks:
             return b""
         
@@ -425,7 +393,6 @@ class AudioService:
     
     @staticmethod
     def _play_audio_bytes(audio_bytes: bytes, sample_rate: int) -> bool:
-        """Play audio bytes using PyAudio."""
         if not audio_bytes:
             return False
         
@@ -450,7 +417,6 @@ class AudioService:
             chunk_size = 4096
             for index in range(0, len(audio_bytes), chunk_size):
                 stream_handle.write(audio_bytes[index:index + chunk_size])
-                # Small sleep to allow other threads to process (macOS window refresh)
                 time.sleep(0.001)
             
             return True

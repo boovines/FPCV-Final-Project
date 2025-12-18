@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 
 class OpenAIClient:
     def __init__(self):
-        """Initialize OpenAI client with API key from environment."""
         load_dotenv()
         
         api_key = os.getenv('OPENAI_API_KEY')
@@ -19,7 +18,6 @@ class OpenAIClient:
     
     def analyze_image(self, image_base64: str, prompt: str, 
                      system_message: Optional[str] = None) -> Optional[str]:
-        """Send image and prompt to OpenAI Vision API."""
         try:
             messages = []
             
@@ -69,7 +67,6 @@ class OpenAIClient:
     
     def analyze_with_default_prompt(self, image_base64: str, 
                                   custom_prompt: Optional[str] = None) -> Optional[str]:
-        """Analyze image with default or custom prompt."""
         if custom_prompt is None:
             custom_prompt = "Please describe what you see in this image. What are the main objects, text, or notable features?"
         
@@ -80,7 +77,6 @@ class OpenAIClient:
         )
     
     def test_connection(self) -> bool:
-        """Test OpenAI API connection."""
         try:
             response = self.client.chat.completions.create(
                 model=self.model,

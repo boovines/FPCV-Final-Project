@@ -6,8 +6,6 @@ from typing import Dict, List, Optional
 
 @dataclass
 class ModeState:
-    """Snapshot of the current mode switching state."""
-
     current_mode: int
     pending_mode: Optional[int]
     progress: float
@@ -15,18 +13,6 @@ class ModeState:
 
 
 class ModeSwitchDetector:
-    """
-    Detects right-hand gestures to toggle between application modes.
-    Modes are sticky - once set, they persist until explicitly changed.
-
-    Gestures:
-        • Thumbs up              → Mode 0
-        • Thumb + Index pinch   → Mode 1
-        • Thumb + Middle pinch  → Mode 2
-        • Thumb + Ring pinch    → Mode 3
-        • Thumb + Pinky pinch   → Mode 4
-    """
-
     THUMB_TIP = 4
     THUMB_IP = 3
     THUMB_MCP = 2
@@ -61,7 +47,6 @@ class ModeSwitchDetector:
         self.last_detected_mode: Optional[int] = None
 
     def update(self, hand_data: List[Dict]) -> ModeState:
-        """Process the latest hand landmarks and update the mode state."""
         now = time.time()
         active_hand = self._select_active_hand(hand_data)
 
@@ -73,7 +58,6 @@ class ModeSwitchDetector:
         palm_size = self._estimate_palm_size(landmarks)
         contact_threshold = palm_size * self.contact_threshold_ratio
 
-        # Check for thumbs up first (mode 0), then pinch gestures (modes 1-4)
         target_mode = self._detect_thumbs_up(landmarks)
         if target_mode is None:
             target_mode = self._detect_pinched_mode(landmarks, contact_threshold)
@@ -92,7 +76,6 @@ class ModeSwitchDetector:
             return ModeState(self.current_mode, None, 0.0, False)
 
         if target_mode == self.current_mode:
-            # Already in this mode – require release before re-triggering.
             self._reset_pending()
             return ModeState(self.current_mode, None, 0.0, False)
 
@@ -162,7 +145,6 @@ class ModeSwitchDetector:
         return closest_mode
 
     def _detect_thumbs_up(self, landmarks: List[Dict]) -> Optional[int]:
-        """Detect thumbs up gesture for mode 0."""
         thumb_tip = landmarks[self.THUMB_TIP]
         thumb_ip = landmarks[self.THUMB_IP]
         thumb_mcp = landmarks[self.THUMB_MCP]
@@ -176,10 +158,7 @@ class ModeSwitchDetector:
         pinky_tip = landmarks[self.PINKY_TIP]
         pinky_pip = landmarks[self.PINKY_PIP]
         
-        # Thumb should be extended upward (tip Y < IP Y and MCP Y)
         thumb_extended = (thumb_tip["y"] < thumb_ip["y"]) and (thumb_tip["y"] < thumb_mcp["y"])
-        
-        # Other fingers should be curled (tips Y > PIP Y)
         fingers_curled = (
             index_tip["y"] > index_pip["y"] and
             middle_tip["y"] > middle_pip["y"] and

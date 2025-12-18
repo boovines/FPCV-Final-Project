@@ -11,7 +11,6 @@ class CropUtils:
         self.output_height = output_height
     
     def crop_frame_region(self, frame: np.ndarray, corners: List[Tuple[float, float]]) -> Optional[np.ndarray]:
-        """Crop the region inside the hand frame using perspective transformation."""
         if len(corners) != 4:
             return None
         
@@ -33,7 +32,6 @@ class CropUtils:
             return None
     
     def encode_image_to_base64(self, image: np.ndarray, format: str = 'JPEG') -> Optional[str]:
-        """Encode image to base64 string for API transmission."""
         try:
             if len(image.shape) == 3 and image.shape[2] == 3:
                 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -52,7 +50,6 @@ class CropUtils:
             return None
     
     def save_cropped_image(self, cropped_image: np.ndarray, filename: str) -> bool:
-        """Save cropped image to file."""
         try:
             success = cv2.imwrite(filename, cropped_image)
             return success
@@ -62,7 +59,6 @@ class CropUtils:
     
     def draw_frame_overlay(self, frame: np.ndarray, corners: List[Tuple[float, float]], 
                           progress: float = 0.0) -> np.ndarray:
-        """Draw frame overlay on the video frame."""
         overlay_frame = frame.copy()
         
         if corners is None or len(corners) != 4:
@@ -100,7 +96,6 @@ class CropUtils:
         return overlay_frame
     
     def draw_mode_switch_progress(self, frame: np.ndarray, progress: float, pending_mode: Optional[int]) -> np.ndarray:
-        """Draw progress bar for mode switch gesture."""
         overlay_frame = frame.copy()
         
         if pending_mode is None or progress <= 0.0:
@@ -130,7 +125,6 @@ class CropUtils:
         return overlay_frame
     
     def validate_crop_quality(self, cropped_image: np.ndarray) -> bool:
-        """Validate that the cropped image is of good quality."""
         if cropped_image is None:
             return False
         

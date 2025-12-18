@@ -1,19 +1,8 @@
-"""
-Google Drive Uploader Module
-
-Handles uploading snapshots to Google Drive using OAuth user authentication.
-Implements Simple Upload as documented at:
-https://developers.google.com/workspace/drive/api/guides/manage-uploads#simple
-
-Uses OAuth 2.0 with user consent for personal Gmail accounts.
-"""
-
 import os
 import json
 from typing import Optional
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
 try:
@@ -27,32 +16,13 @@ try:
 except ImportError:
     GOOGLE_DRIVE_AVAILABLE = False
 
-# Google Drive API scope for file upload
-# https://www.googleapis.com/auth/drive.file - allows creating and accessing files created by this app
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
-
-# Default paths for OAuth credentials and tokens
 DEFAULT_CLIENT_SECRET_FILE = 'client_secret.json'
 DEFAULT_TOKEN_FILE = 'token.json'
 
 
 class GoogleDriveUploader:
-    """
-    Handles OAuth user authentication and file uploads to Google Drive.
-    
-    Uses OAuth 2.0 with user consent for personal Gmail accounts.
-    Uploads files to the authenticated user's My Drive.
-    """
-    
     def __init__(self, folder_id: Optional[str] = None):
-        """
-        Initialize the Google Drive uploader.
-        
-        Args:
-            folder_id: Optional Google Drive folder ID where files should be uploaded.
-                      If None, files will be uploaded to My Drive root.
-                      Can be set via GOOGLE_DRIVE_FOLDER_ID env var.
-        """
         if not GOOGLE_DRIVE_AVAILABLE:
             raise ImportError(
                 "Google Drive API libraries not installed. "
@@ -64,7 +34,6 @@ class GoogleDriveUploader:
         self._authenticate()
     
     def _authenticate(self):
-        """Authenticate with Google Drive API using OAuth 2.0."""
         creds = None
         token_path = DEFAULT_TOKEN_FILE
         
@@ -109,7 +78,6 @@ class GoogleDriveUploader:
         self.service = build('drive', 'v3', credentials=creds)
     
     def upload_file(self, file_path: str, file_name: Optional[str] = None) -> Optional[str]:
-        """Upload a file to Google Drive."""
         if not self.service:
             print("Google Drive isn't set up yet")
             return None
@@ -148,7 +116,6 @@ class GoogleDriveUploader:
     
     @staticmethod
     def _get_mime_type(file_path: str) -> str:
-        """Infer MIME type from file extension."""
         ext = os.path.splitext(file_path)[1].lower()
         mime_types = {
             '.jpg': 'image/jpeg',
@@ -161,7 +128,6 @@ class GoogleDriveUploader:
         return mime_types.get(ext, 'application/octet-stream')
     
     def get_shareable_link(self, file_id: str) -> Optional[str]:
-        """Make a file publicly accessible and get a shareable link."""
         if not self.service:
             print("Google Drive isn't set up yet")
             return None
@@ -196,7 +162,6 @@ class GoogleDriveUploader:
 
 
 def upload_snapshot_to_drive(snapshot_path: str) -> bool:
-    """Upload a snapshot to Google Drive."""
     try:
         uploader = GoogleDriveUploader()
         file_id = uploader.upload_file(snapshot_path)
@@ -207,7 +172,6 @@ def upload_snapshot_to_drive(snapshot_path: str) -> bool:
 
 
 def upload_snapshot_and_get_link(snapshot_path: str) -> Optional[str]:
-    """Upload a snapshot to Google Drive and return a shareable link."""
     try:
         uploader = GoogleDriveUploader()
         file_id = uploader.upload_file(snapshot_path)

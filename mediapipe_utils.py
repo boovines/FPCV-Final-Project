@@ -17,7 +17,6 @@ class HandDetector:
         )
     
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, List[dict]]:
-        """Process a video frame and return annotated frame with hand landmarks."""
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.hands.process(rgb_frame)
         
@@ -56,7 +55,6 @@ class HandDetector:
         return annotated_frame, hand_data
     
     def get_finger_tips(self, hand_data: List[dict]) -> dict:
-        """Extract thumb and index finger tip coordinates for both hands."""
         finger_tips = {'left': None, 'right': None}
         
         for hand in hand_data:
@@ -74,7 +72,6 @@ class HandDetector:
         return finger_tips
     
     def _draw_enhanced_landmarks(self, frame: np.ndarray, hand_landmarks, frame_shape: tuple):
-        """Draw enhanced landmarks with larger markers."""
         h, w = frame_shape[:2]
         
         finger_tips = [4, 8, 12, 16, 20]

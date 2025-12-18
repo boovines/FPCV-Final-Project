@@ -7,14 +7,11 @@ class FrameDetector:
     def __init__(self, stability_threshold: float = 2.0, stability_tolerance: float = 30.0):
         self.stability_threshold = stability_threshold
         self.stability_tolerance = stability_tolerance
-        
-        # Track gesture state
         self.gesture_start_time = None
         self.last_frame_corners = None
         self.is_gesture_active = False
         
     def is_proper_hand_pose(self, hand_data: List[dict]) -> bool:
-        """Check if both hands are in the correct pose."""
         if len(hand_data) != 2:
             return False
         
@@ -29,7 +26,6 @@ class FrameDetector:
             ring_tip = landmarks[16]
             pinky_tip = landmarks[20]
             
-            # Calculate distances from palm center
             thumb_dist = self._distance(wrist, thumb_tip)
             index_dist = self._distance(wrist, index_tip)
             middle_dist = self._distance(wrist, middle_tip)
@@ -44,7 +40,6 @@ class FrameDetector:
         return True
     
     def get_frame_corners(self, finger_tips: dict) -> Optional[List[Tuple[float, float]]]:
-        """Extract the four corner points from hand frame gesture."""
         if not finger_tips['left'] or not finger_tips['right']:
             return None
         
@@ -66,7 +61,6 @@ class FrameDetector:
         return None
     
     def _is_valid_frame(self, corners: List[Tuple[float, float]]) -> bool:
-        """Validate that the four corners form a reasonable frame."""
         if len(corners) != 4:
             return False
         
@@ -93,7 +87,6 @@ class FrameDetector:
         return np.sqrt((point1['x'] - point2['x'])**2 + (point1['y'] - point2['y'])**2)
     
     def check_gesture_stability(self, corners: List[Tuple[float, float]]) -> Tuple[bool, float]:
-        """Check if the gesture has been held stable for the required duration."""
         current_time = time.time()
         
         if corners is None:
@@ -129,7 +122,6 @@ class FrameDetector:
         return is_stable, progress
     
     def detect_frame_gesture(self, hand_data: List[dict], finger_tips: dict) -> Tuple[bool, List[Tuple[float, float]], float]:
-        """Main detection function combining pose detection and stability tracking."""
         if not self.is_proper_hand_pose(hand_data):
             self.gesture_start_time = None
             self.last_frame_corners = None

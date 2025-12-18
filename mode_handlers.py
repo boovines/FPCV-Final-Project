@@ -1,14 +1,3 @@
-"""
-Mode Handlers Module
-
-Contains all mode-specific functionality for the Vision-Prompt Glasses:
-- Mode 0: AI Processing with STT/TTS
-- Mode 1: Google Drive Upload
-- Mode 2: Google Drive Upload and iMessage Link
-- Mode 3: Location Detection
-- Mode 4: Visual Product Search
-"""
-
 import os
 import numpy as np
 from typing import Optional
@@ -38,21 +27,11 @@ except ImportError:
 
 
 class ModeHandlers:
-    """Handles all mode-specific operations."""
-    
     def __init__(self, openai_client, audio_service):
-        """
-        Initialize mode handlers with required services.
-        
-        Args:
-            openai_client: OpenAI API client for image analysis
-            audio_service: Audio service for TTS/STT
-        """
         self.openai_client = openai_client
         self.audio_service = audio_service
     
     def handle_mode_0(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """Mode 0: AI Processing with STT/TTS"""
         prompt = self.audio_service.capture_spoken_prompt()
         if not prompt:
             return
@@ -66,7 +45,6 @@ class ModeHandlers:
             print("Couldn't analyze the image")
     
     def handle_mode_1(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """Mode 1: Google Drive Upload"""
         if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_to_drive is None:
             print("Install Google Drive packages to use this mode")
             return
@@ -81,7 +59,6 @@ class ModeHandlers:
             print("Upload failed")
     
     def handle_mode_2(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """Mode 2: Google Drive Upload and iMessage Link"""
         if not GOOGLE_DRIVE_AVAILABLE or upload_snapshot_and_get_link is None:
             print("Install Google Drive packages to use this mode")
             return
@@ -110,7 +87,6 @@ class ModeHandlers:
             self.audio_service.output_ai_response("Photo uploaded but couldn't send")
     
     def handle_mode_3(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """Mode 3: Location Detection"""
         print("Detecting location...")
         
         location_prompt = "Look at the contextual image. Guess where this is. Give a short answer, limited to 5 words, that just includes the region, city, country, etc. If you know where it is, just say \"The location is probably...\", and if you don't know, say \"I'm sorry, I'm not sure where this is.\""
@@ -131,7 +107,6 @@ class ModeHandlers:
             self.audio_service.output_ai_response("Can't determine location")
     
     def handle_mode_4(self, cropped_image: np.ndarray, snapshot_path: str, image_base64: str):
-        """Mode 4: Visual Product Search with SerpAPI Google Shopping"""
         if not PRODUCT_SEARCH_AVAILABLE or search_similar_products is None:
             print("Product search not available")
             self.audio_service.output_ai_response("Product search isn't available")
@@ -185,15 +160,6 @@ class ModeHandlers:
     
     def handle_snapshot(self, cropped_image: np.ndarray, snapshot_path: str, 
                        image_base64: str, mode: int):
-        """
-        Route snapshot to appropriate mode handler.
-        
-        Args:
-            cropped_image: The cropped image as numpy array
-            snapshot_path: Path where snapshot is saved
-            image_base64: Base64-encoded image string
-            mode: Current mode (0-4)
-        """
         if mode == 0:
             self.handle_mode_0(cropped_image, snapshot_path, image_base64)
         elif mode == 1:
