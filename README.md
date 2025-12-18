@@ -1,4 +1,4 @@
-# Before usage, please install prerequisites in requirements.txt and set up the following environment variables:
+### Before usage, please install prerequisites in requirements.txt and set up the following environment variables:
 
 OPENAI_API_KEY
 
@@ -11,3 +11,6 @@ GOOGLE_DRIVE_CLIENT_SECRET_JSON
 SERPAPI_API_KEY
 
 IMESSAGE_RECIPIENT
+
+### To run, use
+python main.py
